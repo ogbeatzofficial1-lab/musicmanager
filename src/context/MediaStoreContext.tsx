@@ -2,7 +2,9 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import localforage from 'localforage';
 import { Track, Playlist, Client, Activity, ShareLink, UserProfile, Message, PromoVideo } from '../types';
-import { supabase } from "../lib/supabase";
+import { supabase, initSupabase } from "../lib/supabase";
+
+const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 
 
 interface MediaStoreContextType {
@@ -35,6 +37,9 @@ interface MediaStoreContextType {
   addPromoVideo: (video: Partial<PromoVideo>) => Promise<void>;
   deletePromoVideo: (id: string) => Promise<void>;
   incrementShareLinkAccess: (id: string) => Promise<void>;
+  refreshSync: () => Promise<void>;
+  isSupabaseConfigured: boolean;
+  connectionError: string | null;
 }
 
 const MediaStoreContext = createContext<MediaStoreContextType | undefined>(undefined);
@@ -49,219 +54,202 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
   const [promoVideos, setPromoVideos] = useState<PromoVideo[]>([]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isSupabaseConfigured, setIsSupabaseConfigured] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function init() {
-      if (supabase) {
-        try {
-          const fetchSafely = async (table: string) => {
-            const { data, error } = await supabase!.from(table).select('*');
+  async function loadFromLocal() {
+    const loadKey = async <T,>(key: string): Promise<T | null> => {
+      let val: T | null = null;
+      try {
+        val = await localforage.getItem<T>(key);
+      } catch (e) {
+        console.warn(`LocalForage getItem error for ${key}:`, e);
+      }
+      return val;
+    };
+
+    const localTracks = await loadKey<any[]>('mm_tracks');
+    const localPlaylists = await loadKey<any[]>('mm_playlists');
+    const localClients = await loadKey<any[]>('mm_clients');
+    const localShareLinks = await loadKey<any[]>('mm_share_links');
+    const localMessages = await loadKey<any[]>('mm_messages');
+    const localPromoVideos = await loadKey<any[]>('mm_promo_videos');
+    const localActivities = await loadKey<any[]>('mm_activities');
+    const localProfile = await loadKey<UserProfile>('mm_profile');
+    
+    let parsedTracks = localTracks || [];
+    
+    const cleanedTracks = parsedTracks.map((t: Track) => {
+      if (t.file_data && t.file_data instanceof Blob) {
+         t.file_url = URL.createObjectURL(t.file_data);
+         t._brokenBlob = false;
+      } else if (t.file_url?.startsWith('blob:')) {
+        delete t.file_url;
+        t._brokenBlob = true; 
+      }
+      if (t.image_data && t.image_data instanceof Blob) {
+         t.image_url = URL.createObjectURL(t.image_data);
+      }
+      return t;
+    });
+    setTracks(cleanedTracks);
+
+    setPlaylists(localPlaylists || []);
+    setClients(localClients || []);
+    setMessages(localMessages || []);
+    setShareLinks(localShareLinks || []);
+    
+    const parsedVideos = localPromoVideos || [];
+    const cleanedVideos = parsedVideos.map((v: PromoVideo) => {
+      if (v.video_data && v.video_data instanceof Blob) {
+         v.video_url = URL.createObjectURL(v.video_data);
+         v._brokenBlob = false;
+      } else if (v.video_url?.startsWith('blob:')) {
+        delete (v as any).video_url;
+        v._brokenBlob = true;
+      }
+      if (v.thumbnail_data && v.thumbnail_data instanceof Blob) {
+         v.thumbnail_url = URL.createObjectURL(v.thumbnail_data);
+      }
+      return v;
+    });
+    setPromoVideos(cleanedVideos);
+    setActivities(localActivities || []);
+    setProfile(localProfile);
+  }
+
+  async function init() {
+    setConnectionError(null);
+    let activeSupabase = supabase;
+    
+    // Step 1: Try to fetch configuration from server to catch runtime env vars
+    try {
+      const configRes = await fetch('/api/config');
+      if (configRes.ok) {
+        const config = await configRes.json();
+        if (config.supabaseUrl && config.supabaseAnonKey) {
+          console.log("[MediaStore] Initializing Supabase with server-side config");
+          activeSupabase = initSupabase(config.supabaseUrl, config.supabaseAnonKey);
+        }
+      }
+    } catch (e) {
+      console.warn("[MediaStore] Failed to fetch config from server", e);
+    }
+
+    if (activeSupabase) {
+      setIsSupabaseConfigured(true);
+      try {
+        const fetchSafely = async (table: string) => {
+          try {
+            const { data, error } = await activeSupabase!.from(table).select('*');
             if (error) {
-              console.warn(`Error fetching ${table}:`, error);
+              console.warn(`[MediaStore] Error fetching ${table}:`, error.message);
+              if (error.message.includes('RLS') || error.message.includes('permission')) {
+                setConnectionError(`Security Restriction on table: ${table}. Check RLS policies.`);
+              } else {
+                setConnectionError(`Fetch error on ${table}: ${error.message}`);
+              }
               return null;
             }
             return data;
-          };
+          } catch (e: any) {
+            console.warn(`[MediaStore] Exception fetching ${table}:`, e);
+            setConnectionError(`Connection failed: ${e.message || 'Unknown error'}`);
+            return null;
+          }
+        };
 
-          const trData = await fetchSafely('tracks');
-          const plData = await fetchSafely('playlists');
-          const clData = await fetchSafely('clients');
-          const slData = await fetchSafely('share_links');
-          const actData = await fetchSafely('activities');
-          const msgData = await fetchSafely('messages');
-          const pvData = await fetchSafely('promo_videos');
+        const trData = await fetchSafely('tracks');
+        const plData = await fetchSafely('playlists');
+        const clData = await fetchSafely('clients');
+        const slData = await fetchSafely('share_links');
+        const actData = await fetchSafely('activities');
+        const msgData = await fetchSafely('messages');
+        const pvData = await fetchSafely('promo_videos');
 
-          // Fallback + Migration
-          let apiDb: any = null;
-          try {
-            const res = await fetch('/api/media');
-            if (res.ok) apiDb = await res.json();
-          } catch (e) {}
+        const safeParseList = async (tableData: any, localKey: string, tableName: string) => {
+          if (tableData && Array.isArray(tableData) && tableData.length > 0) return tableData;
 
-          const safeParseList = async (tableData: any, localKey: string, tableName: string) => {
-            if (tableData && tableData.length > 0) return tableData;
-
-            // Supabase table is empty, try to get from localForage
-            let locally = await localforage.getItem(localKey);
-            
-            // If localForage is empty, try apiDb (mock data)
-            if (!locally || (Array.isArray(locally) && locally.length === 0)) {
-               const collectionName = localKey.replace('mm_', '');
-               if (apiDb && apiDb[collectionName] && apiDb[collectionName].length > 0) {
-                  locally = apiDb[collectionName];
-               }
-            }
-
-            if (locally && Array.isArray(locally) && locally.length > 0) {
-              console.log(`Migrating ${locally.length} items to Supabase table ${tableName}`);
-              // Try migrating to Supabase - sanitize first to remove non-DB fields
-              const sanitizedDbItems = locally.map(item => {
-                const copy = { ...item };
-                Object.keys(copy).forEach(key => {
-                  if (key.startsWith('_') || key.endsWith('_data')) {
-                    delete (copy as any)[key];
-                  }
-                });
-                return copy;
-              });
-              const { error } = await supabase!.from(tableName).insert(sanitizedDbItems);
-              if (error) console.warn(`Failed to migrate ${tableName}:`, error);
-              return locally;
-            }
-            return [];
-          };
-
-          setTracks(await safeParseList(trData, 'mm_tracks', 'tracks'));
-          setPlaylists(await safeParseList(plData, 'mm_playlists', 'playlists'));
-          setClients(await safeParseList(clData, 'mm_clients', 'clients'));
-          setShareLinks(await safeParseList(slData, 'mm_share_links', 'share_links'));
-          setActivities(await safeParseList(actData, 'mm_activities', 'activities'));
-          setMessages(await safeParseList(msgData, 'mm_messages', 'messages'));
-          setPromoVideos(await safeParseList(pvData, 'mm_promo_videos', 'promo_videos'));
+          // Supabase table is empty or fetch failed, try to get from localForage
+          const locally = await localforage.getItem(localKey);
           
-          const { data: profData, error: profError } = await supabase.from('profiles').select('*').single();
-          if (profError && profError.code !== 'PGRST116') { // Ignore zero rows error for profile
-            console.warn("Profile fetch error:", profError);
-          }
-          if (profData) {
-            setProfile(profData);
-          } else {
-             let locallyProf = await localforage.getItem<UserProfile>('mm_profile');
-             if (!locallyProf && apiDb && apiDb.profile) {
-                locallyProf = apiDb.profile;
-             }
-             if (locallyProf) {
-                console.log(`Migrating profile to Supabase...`);
-                // Try migrating profile
-                const sanitizedProf = { ...locallyProf };
-                Object.keys(sanitizedProf).forEach(key => {
-                  if (key.startsWith('_') || key.endsWith('_data')) {
-                    delete (sanitizedProf as any)[key];
-                  }
-                });
-                const { error } = await supabase.from('profiles').insert(sanitizedProf);
-                if (error) console.warn("Failed to migrate profile:", error);
-                setProfile(locallyProf);
-             } else {
-                setProfile(null);
-             }
-          }
+          if (locally && Array.isArray(locally) && locally.length > 0) {
+            console.log(`[MediaStore] Migrating ${locally.length} items to Supabase table ${tableName}`);
+            const sanitizedDbItems = locally.map(item => {
+              const copy = { ...item };
+              // Robust UUID check: Supabase requires valid UUID for ID primary keys
+              if (copy.id && !isUUID(copy.id)) {
+                console.log(`[MediaStore] Non-UUID detected (${copy.id}) in ${tableName}, stripping to allow auto-generation`);
+                delete copy.id;
+              }
+              // Strip UI-only and binary data fields
+              Object.keys(copy).forEach(key => {
+                if (key.startsWith('_') || key.endsWith('_data')) {
+                  delete (copy as any)[key];
+                }
+              });
+              return copy;
+            });
 
-        } catch (e) {
-          console.error("Supabase load error:", e);
-          await loadFromLocal();
+            // Use upsert to avoid duplicate key errors on migration retry
+            const { error, data } = await activeSupabase!.from(tableName).upsert(sanitizedDbItems, { onConflict: 'id' }).select();
+            
+            if (error) {
+              console.error(`[MediaStore] Migration Failure for ${tableName}:`, error.message, error.details);
+              return locally; // Fallback to local data if migration fails
+            } else if (data) {
+              console.log(`[MediaStore] Successfully migrated ${data.length} items to ${tableName}`);
+              return data;
+            }
+          }
+          return tableData || [];
+        };
+
+        setTracks(await safeParseList(trData, 'mm_tracks', 'tracks'));
+        setPlaylists(await safeParseList(plData, 'mm_playlists', 'playlists'));
+        setClients(await safeParseList(clData, 'mm_clients', 'clients'));
+        setShareLinks(await safeParseList(slData, 'mm_share_links', 'share_links'));
+        setActivities(await safeParseList(actData, 'mm_activities', 'activities'));
+        setMessages(await safeParseList(msgData, 'mm_messages', 'messages'));
+        setPromoVideos(await safeParseList(pvData, 'mm_promo_videos', 'promo_videos'));
+        
+        const { data: profData, error: profError } = await activeSupabase.from('profiles').select('*').single();
+        if (profData) {
+          setProfile(profData);
+        } else {
+           const locallyProf = await localforage.getItem<UserProfile>('mm_profile');
+           if (locallyProf) {
+              console.log(`[MediaStore] Migrating profile to Supabase...`);
+              const sanitizedProf = { ...locallyProf };
+              if (sanitizedProf.id && !isUUID(sanitizedProf.id)) delete sanitizedProf.id;
+              Object.keys(sanitizedProf).forEach(key => {
+                if (key.startsWith('_') || key.endsWith('_data')) {
+                  delete (sanitizedProf as any)[key];
+                }
+              });
+              const { data: insertedProf, error: insErr } = await activeSupabase.from('profiles').insert(sanitizedProf).select().single();
+              if (insErr) console.error("[MediaStore] Profile migration error:", insErr.message);
+              setProfile(insertedProf || locallyProf);
+           } else {
+              setProfile(null);
+           }
         }
-      } else {
+
+      } catch (e) {
+        console.error("Supabase load error:", e);
         await loadFromLocal();
       }
+    } else {
+      await loadFromLocal();
+    }
+  }
+
+  useEffect(() => {
+    async function start() {
+      await init();
       setLoading(false);
     }
-
-    async function loadFromLocal() {
-      const loadKey = async <T,>(key: string): Promise<T | null> => {
-        let val: T | null = null;
-        try {
-          val = await localforage.getItem<T>(key);
-        } catch (e) {
-          console.warn(`LocalForage getItem error for ${key}:`, e);
-        }
-        
-        // Migrate from localStorage if localForage is empty
-        if (val == null || (Array.isArray(val) && val.length === 0)) {
-          const lsVal = localStorage.getItem(key);
-          if (lsVal) {
-            try {
-              const parsed = JSON.parse(lsVal) as T;
-              if ((Array.isArray(parsed) && parsed.length > 0) || (!Array.isArray(parsed) && parsed)) {
-                val = parsed;
-                localforage.setItem(key, parsed).catch(() => {});
-              }
-            } catch (e) {}
-          }
-        }
-        return val;
-      };
-
-      let apiDb: any = null;
-      try {
-        const res = await fetch('/api/media');
-        if (res.ok) {
-          apiDb = await res.json();
-        }
-      } catch (e) {
-        console.warn("API GET failed, using localForage fallback", e);
-      }
-
-      const getApiOrLocal = async <T,>(apiData: any, localKey: string): Promise<T | null> => {
-         if (apiData && (Array.isArray(apiData) ? apiData.length > 0 : !!apiData)) return apiData;
-         return await loadKey<T>(localKey);
-      };
-
-      const localTracks = await getApiOrLocal<any[]>(apiDb?.tracks, 'mm_tracks');
-      const localPlaylists = await getApiOrLocal<any[]>(apiDb?.playlists, 'mm_playlists');
-      const localClients = await getApiOrLocal<any[]>(apiDb?.clients, 'mm_clients');
-      const localShareLinks = await getApiOrLocal<any[]>(apiDb?.share_links, 'mm_share_links');
-      const localMessages = await getApiOrLocal<any[]>(apiDb?.messages, 'mm_messages');
-      const localPromoVideos = await getApiOrLocal<any[]>(apiDb?.promo_videos, 'mm_promo_videos');
-      const localActivities = await getApiOrLocal<any[]>(apiDb?.activities, 'mm_activities');
-      const localProfile = await getApiOrLocal<UserProfile>(apiDb?.profile, 'mm_profile');
-      
-      let parsedTracks = localTracks || [];
-      
-      const cleanedTracks = parsedTracks.map((t: Track) => {
-        if (t.file_data && t.file_data instanceof Blob) {
-           t.file_url = URL.createObjectURL(t.file_data);
-           t._brokenBlob = false;
-        } else if (t.file_url?.startsWith('blob:')) {
-          delete t.file_url;
-          t._brokenBlob = true; 
-        }
-        if (t.image_data && t.image_data instanceof Blob) {
-           t.image_url = URL.createObjectURL(t.image_data);
-        }
-        return t;
-      });
-      setTracks(cleanedTracks);
-
-      setPlaylists(localPlaylists || []);
-      setClients(localClients || []);
-      setMessages(localMessages || []);
-      setShareLinks(localShareLinks || []);
-      
-      const parsedVideos = localPromoVideos || [];
-      const cleanedVideos = parsedVideos.map((v: PromoVideo) => {
-        if (v.video_data && v.video_data instanceof Blob) {
-           v.video_url = URL.createObjectURL(v.video_data);
-           v._brokenBlob = false;
-        } else if (v.video_url?.startsWith('blob:')) {
-          delete (v as any).video_url;
-          v._brokenBlob = true;
-        }
-        if (v.thumbnail_data && v.thumbnail_data instanceof Blob) {
-           v.thumbnail_url = URL.createObjectURL(v.thumbnail_data);
-        }
-        return v;
-      });
-      setPromoVideos(cleanedVideos);
-      
-      setActivities(localActivities || []);
-      
-      const defaultProfile: UserProfile = {
-        id: 'user-1',
-        name: 'OG Beatz',
-        artist_name: 'OGBeatz',
-        bio: 'Premium sound architecture and master engineering.',
-        email: 'og@beatz.com',
-        avatar_url: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=400&h=400&fit=crop',
-        social_links: {
-          instagram: '@ogbeatz',
-          spotify: 'ogbeatz-official'
-        }
-      };
-      setProfile(localProfile || defaultProfile);
-    }
-
-    init();
+    start();
   }, []);
 
   const safeSave = async (key: string, data: any) => {
@@ -270,16 +258,7 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     } catch (e) {
       console.warn(`LocalForage save error for ${key}:`, e);
     }
-    try {
-      const collectionName = key.replace('mm_', '');
-      await fetch('/api/media', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ collection: collectionName, data })
-      });
-    } catch (e) {
-      console.warn(`Express API save error for ${key}:`, e);
-    }
+    // Express API mock removed - strictly Supabase or Local
   };
 
   const addTrack = async (track: Partial<Track>) => {
@@ -738,8 +717,16 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
-  const deleteActivity = (id: string) => {
-    // ...
+  const deleteActivity = async (id: string) => {
+    setActivities(prev => {
+      const updated = prev.filter(a => a.id !== id);
+      safeSave('mm_activities', updated);
+      return updated;
+    });
+    if (supabase) {
+      const { error } = await supabase.from('activities').delete().eq('id', id);
+      if (error) console.error(error);
+    }
   };
 
   const incrementShareLinkAccess = async (id: string) => {
@@ -814,11 +801,26 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
+  const refreshSync = async () => {
+    setLoading(true);
+    await init();
+    setLoading(false);
+  };
+
+  const clearLocalCache = async () => {
+    await localforage.clear();
+    window.location.reload();
+  };
+
   return (
     <MediaStoreContext.Provider value={{
       tracks, playlists, clients, activities, profile, loading, shareLinks, messages, promoVideos,
       addTrack, updateTrack, deleteTrack, addPlaylist, updatePlaylist, deletePlaylist, addTrackToPlaylist, removeTrackFromPlaylist,
-      addClient, updateClient, deleteClient, updateProfile, addShareLink, getShareContent, addActivity, analyzeTrack, sendMessage, addPromoVideo, deletePromoVideo, incrementShareLinkAccess
+      addClient, updateClient, deleteClient, updateProfile, addShareLink, getShareContent, addActivity, analyzeTrack, sendMessage, addPromoVideo, deletePromoVideo, incrementShareLinkAccess,
+      refreshSync,
+      isSupabaseConfigured,
+      // @ts-ignore
+      clearLocalCache
     }}>
       {children}
     </MediaStoreContext.Provider>

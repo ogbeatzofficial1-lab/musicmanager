@@ -12,49 +12,6 @@ const PORT = Number(process.env.PORT) || 3000;
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
-const memoryDb: any = {
-  tracks: [],
-  playlists: [],
-  clients: [],
-  activities: [],
-  messages: [],
-  promo_videos: [],
-  promo_packs: [],
-  share_links: [],
-  profile: {
-    id: "user-1",
-    name: "OG Beatz",
-    artist_name: "OGBeatz",
-    email: "ogbeatz@example.com",
-    avatar_url: "/favicon.svg",
-    bio: "Premium sound architecture and master engineering.",
-    created_at: new Date().toISOString()
-  }
-};
-
-app.get("/api/config", (req, res) => {
-  res.json({
-    supabaseUrl: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || null,
-    supabaseAnonKey: process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || null
-  });
-});
-
-app.get("/api/media", (req, res) => {
-  res.json(memoryDb);
-});
-
-app.post("/api/media", (req, res) => {
-  const { collection, data } = req.body;
-  if (!collection) return res.status(400).json({ error: "collection required" });
-  
-  if (collection === 'profile') {
-    memoryDb.profile = data;
-  } else {
-    memoryDb[collection] = data;
-  }
-  res.json({ success: true });
-});
-
 // Initialize Gemini
 let ai: GoogleGenAI | null = null;
 if (process.env.GEMINI_API_KEY) {
@@ -69,6 +26,12 @@ if (process.env.GEMINI_API_KEY) {
 }
 
 // API Routes
+app.get("/api/config", (req, res) => {
+  res.json({
+    supabaseUrl: process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || null,
+    supabaseAnonKey: process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || null
+  });
+});
 app.post("/api/analyze-metadata", async (req, res) => {
   if (!ai) return res.status(500).json({ error: "Gemini API key is not configured. Please add GEMINI_API_KEY to your .env file." });
   const { fileName } = req.body;
