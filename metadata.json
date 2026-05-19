@@ -1,6 +1,6 @@
 {
-  "name": "OG BEATZ • Producer Portal",
-  "description": "Premium producer management system for master track delivery, client engagement, and AI-powered promo generation.",
+  "name": "OG BEATZ",
+  "description": "High-fidelity media management and master reference portal for OG BEATZ.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }

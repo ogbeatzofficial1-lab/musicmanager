@@ -9,11 +9,9 @@ import {
   Settings,
   Menu,
   ChevronRight,
-  MessageSquare,
-  Video
+  MessageSquare
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { useMediaStore } from '../context/MediaStoreContext';
 
 interface ShellProps {
   children: React.ReactNode;
@@ -23,7 +21,6 @@ interface ShellProps {
 
 export default function Shell({ children, activeView, onViewChange }: ShellProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const { profile } = useMediaStore();
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -31,16 +28,14 @@ export default function Shell({ children, activeView, onViewChange }: ShellProps
     { id: 'playlists', label: 'Playlists', icon: ListMusic },
     { id: 'clients', label: 'Clients', icon: Users },
     { id: 'messages', label: 'Messages', icon: MessageSquare },
-    { id: 'videos', label: 'Promo Archive', icon: Video },
     { id: 'sharing', label: 'Sharing', icon: Share2 },
     { id: 'activity', label: 'Activity', icon: ActivityIcon },
   ];
 
   return (
-    <div id="shell-container" className="flex h-screen bg-black text-white font-sans overflow-hidden">
+    <div className="flex h-screen bg-black text-white font-sans overflow-hidden">
       {/* Sidebar */}
       <aside 
-        id="sidebar"
         className={cn(
           "bg-zinc-950 border-r border-zinc-900 transition-all duration-300 flex flex-col",
           collapsed ? "w-20" : "w-64"
@@ -51,10 +46,10 @@ export default function Shell({ children, activeView, onViewChange }: ShellProps
             {!collapsed && (
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full overflow-hidden border border-orange-500 bg-zinc-900 flex items-center justify-center">
-                  <img src={profile?.avatar_url || "/favicon.svg"} className="w-full h-full object-cover" alt="Profile" />
+                  <img src="/favicon.svg" className="w-7 h-7 object-contain" alt="OG BEATZ" />
                 </div>
                 <div className="flex flex-col">
-                  <h1 className="text-sm font-black tracking-tighter leading-none uppercase truncate max-w-[100px]">{profile?.name || 'OGBEATZ'}</h1>
+                  <h1 className="text-sm font-black tracking-tighter leading-none">OGBEATZ</h1>
                   <span className="text-[10px] font-black text-orange-500 tracking-[0.2em]">HUB</span>
                 </div>
               </div>
@@ -95,25 +90,18 @@ export default function Shell({ children, activeView, onViewChange }: ShellProps
                activeView === 'settings' ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-white hover:bg-zinc-900"
              )}
            >
-             <Settings className={cn("w-5 h-5 transition-transform group-hover:rotate-110", activeView === 'settings' ? "text-orange-500" : "text-zinc-600")} />
+             <Settings className={cn("w-5 h-5 transition-transform group-hover:rotate-90", activeView === 'settings' ? "text-orange-500" : "text-zinc-600")} />
              {!collapsed && <span className="text-sm font-medium">Settings</span>}
            </button>
 
            {!collapsed && (
-             <div 
-               onClick={() => onViewChange('profile')}
-               className="bg-zinc-900/50 p-3 rounded-2xl border border-zinc-800 flex items-center gap-3 cursor-pointer hover:bg-zinc-800 transition-all group/profile"
-             >
-               <div className="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center text-xs font-black text-black shrink-0 shadow-lg shadow-orange-500/10 group-hover/profile:scale-110 transition-transform overflow-hidden">
-                 {profile?.avatar_url ? (
-                   <img src={profile.avatar_url} className="w-full h-full object-cover" />
-                 ) : (
-                   profile?.name?.[0] || 'O'
-                 )}
+             <div className="bg-zinc-900/50 p-3 rounded-2xl border border-zinc-800 flex items-center gap-3">
+               <div className="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center text-xs font-black text-black shrink-0">
+                 OB
                </div>
                <div className="flex flex-col min-w-0">
-                 <span className="text-xs font-bold truncate group-hover/profile:text-orange-500 transition-colors">{profile?.name || 'OGBeatz Admin'}</span>
-                 <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider truncate">{profile?.artist_name || 'PRO PRODUCER'}</span>
+                 <span className="text-xs font-bold truncate">OGBeatz Admin</span>
+                 <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider truncate">PRO PRODUCER</span>
                </div>
              </div>
            )}
@@ -121,7 +109,7 @@ export default function Shell({ children, activeView, onViewChange }: ShellProps
       </aside>
 
       {/* Main Content */}
-      <main id="main-content" className="flex-1 overflow-y-auto pb-32">
+      <main className="flex-1 overflow-y-auto pb-32">
         {children}
       </main>
     </div>

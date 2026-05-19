@@ -1,11 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import localforage from 'localforage';
 import { Track, Playlist, Client, Activity, ShareLink, UserProfile, Message, PromoVideo } from '../types';
-import { supabase, initSupabase } from "../lib/supabase";
-
-const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
-
+import { getSupabase } from '../lib/supabase';
 
 interface MediaStoreContextType {
   tracks: Track[];
@@ -28,7 +24,6 @@ interface MediaStoreContextType {
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
   shareLinks: ShareLink[];
   addShareLink: (link: Partial<ShareLink>) => Promise<ShareLink>;
-  getShareContent: (token: string) => Promise<{ track?: Track, playlist?: Playlist, link: ShareLink } | null>;
   addActivity: (activity: Partial<Activity>) => Promise<void>;
   analyzeTrack: (name: string) => Promise<{ bpm: number, key: string, duration?: number }>;
   messages: Message[];
@@ -36,10 +31,6 @@ interface MediaStoreContextType {
   promoVideos: PromoVideo[];
   addPromoVideo: (video: Partial<PromoVideo>) => Promise<void>;
   deletePromoVideo: (id: string) => Promise<void>;
-  incrementShareLinkAccess: (id: string) => Promise<void>;
-  refreshSync: () => Promise<void>;
-  isSupabaseConfigured: boolean;
-  connectionError: string | null;
 }
 
 const MediaStoreContext = createContext<MediaStoreContextType | undefined>(undefined);
@@ -54,211 +45,155 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
   const [promoVideos, setPromoVideos] = useState<PromoVideo[]>([]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isSupabaseConfigured, setIsSupabaseConfigured] = useState(false);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
 
-  async function loadFromLocal() {
-    const loadKey = async <T,>(key: string): Promise<T | null> => {
-      let val: T | null = null;
-      try {
-        val = await localforage.getItem<T>(key);
-      } catch (e) {
-        console.warn(`LocalForage getItem error for ${key}:`, e);
-      }
-      return val;
-    };
-
-    const localTracks = await loadKey<any[]>('mm_tracks');
-    const localPlaylists = await loadKey<any[]>('mm_playlists');
-    const localClients = await loadKey<any[]>('mm_clients');
-    const localShareLinks = await loadKey<any[]>('mm_share_links');
-    const localMessages = await loadKey<any[]>('mm_messages');
-    const localPromoVideos = await loadKey<any[]>('mm_promo_videos');
-    const localActivities = await loadKey<any[]>('mm_activities');
-    const localProfile = await loadKey<UserProfile>('mm_profile');
-    
-    let parsedTracks = localTracks || [];
-    
-    const cleanedTracks = parsedTracks.map((t: Track) => {
-      if (t.file_data && t.file_data instanceof Blob) {
-         t.file_url = URL.createObjectURL(t.file_data);
-         t._brokenBlob = false;
-      } else if (t.file_url?.startsWith('blob:')) {
-        delete t.file_url;
-        t._brokenBlob = true; 
-      }
-      if (t.image_data && t.image_data instanceof Blob) {
-         t.image_url = URL.createObjectURL(t.image_data);
-      }
-      return t;
-    });
-    setTracks(cleanedTracks);
-
-    setPlaylists(localPlaylists || []);
-    setClients(localClients || []);
-    setMessages(localMessages || []);
-    setShareLinks(localShareLinks || []);
-    
-    const parsedVideos = localPromoVideos || [];
-    const cleanedVideos = parsedVideos.map((v: PromoVideo) => {
-      if (v.video_data && v.video_data instanceof Blob) {
-         v.video_url = URL.createObjectURL(v.video_data);
-         v._brokenBlob = false;
-      } else if (v.video_url?.startsWith('blob:')) {
-        delete (v as any).video_url;
-        v._brokenBlob = true;
-      }
-      if (v.thumbnail_data && v.thumbnail_data instanceof Blob) {
-         v.thumbnail_url = URL.createObjectURL(v.thumbnail_data);
-      }
-      return v;
-    });
-    setPromoVideos(cleanedVideos);
-    setActivities(localActivities || []);
-    setProfile(localProfile);
-  }
-
-  async function init() {
-    setConnectionError(null);
-    let activeSupabase = supabase;
-    
-    // Step 1: Try to fetch configuration from server to catch runtime env vars
-    try {
-      const configRes = await fetch('/api/config');
-      if (configRes.ok) {
-        const config = await configRes.json();
-        if (config.supabaseUrl && config.supabaseAnonKey) {
-          console.log("[MediaStore] Initializing Supabase with server-side config");
-          activeSupabase = initSupabase(config.supabaseUrl, config.supabaseAnonKey);
-        }
-      }
-    } catch (e) {
-      console.warn("[MediaStore] Failed to fetch config from server", e);
-    }
-
-    if (activeSupabase) {
-      setIsSupabaseConfigured(true);
-      try {
-        const fetchSafely = async (table: string) => {
-          try {
-            const { data, error } = await activeSupabase!.from(table).select('*');
-            if (error) {
-              console.warn(`[MediaStore] Error fetching ${table}:`, error.message);
-              if (error.message.includes('RLS') || error.message.includes('permission')) {
-                setConnectionError(`Security Restriction on table: ${table}. Check RLS policies.`);
-              } else {
-                setConnectionError(`Fetch error on ${table}: ${error.message}`);
-              }
-              return null;
-            }
-            return data;
-          } catch (e: any) {
-            console.warn(`[MediaStore] Exception fetching ${table}:`, e);
-            setConnectionError(`Connection failed: ${e.message || 'Unknown error'}`);
-            return null;
-          }
-        };
-
-        const trData = await fetchSafely('tracks');
-        const plData = await fetchSafely('playlists');
-        const clData = await fetchSafely('clients');
-        const slData = await fetchSafely('share_links');
-        const actData = await fetchSafely('activities');
-        const msgData = await fetchSafely('messages');
-        const pvData = await fetchSafely('promo_videos');
-
-        const safeParseList = async (tableData: any, localKey: string, tableName: string) => {
-          if (tableData && Array.isArray(tableData) && tableData.length > 0) return tableData;
-
-          // Supabase table is empty or fetch failed, try to get from localForage
-          const locally = await localforage.getItem(localKey);
-          
-          if (locally && Array.isArray(locally) && locally.length > 0) {
-            console.log(`[MediaStore] Migrating ${locally.length} items to Supabase table ${tableName}`);
-            const sanitizedDbItems = locally.map(item => {
-              const copy = { ...item };
-              // Robust UUID check: Supabase requires valid UUID for ID primary keys
-              if (copy.id && !isUUID(copy.id)) {
-                console.log(`[MediaStore] Non-UUID detected (${copy.id}) in ${tableName}, stripping to allow auto-generation`);
-                delete copy.id;
-              }
-              // Strip UI-only and binary data fields
-              Object.keys(copy).forEach(key => {
-                if (key.startsWith('_') || key.endsWith('_data')) {
-                  delete (copy as any)[key];
-                }
-              });
-              return copy;
-            });
-
-            // Use upsert to avoid duplicate key errors on migration retry
-            const { error, data } = await activeSupabase!.from(tableName).upsert(sanitizedDbItems, { onConflict: 'id' }).select();
-            
-            if (error) {
-              console.error(`[MediaStore] Migration Failure for ${tableName}:`, error.message, error.details);
-              return locally; // Fallback to local data if migration fails
-            } else if (data) {
-              console.log(`[MediaStore] Successfully migrated ${data.length} items to ${tableName}`);
-              return data;
-            }
-          }
-          return tableData || [];
-        };
-
-        setTracks(await safeParseList(trData, 'mm_tracks', 'tracks'));
-        setPlaylists(await safeParseList(plData, 'mm_playlists', 'playlists'));
-        setClients(await safeParseList(clData, 'mm_clients', 'clients'));
-        setShareLinks(await safeParseList(slData, 'mm_share_links', 'share_links'));
-        setActivities(await safeParseList(actData, 'mm_activities', 'activities'));
-        setMessages(await safeParseList(msgData, 'mm_messages', 'messages'));
-        setPromoVideos(await safeParseList(pvData, 'mm_promo_videos', 'promo_videos'));
-        
-        const { data: profData, error: profError } = await activeSupabase.from('profiles').select('*').single();
-        if (profData) {
-          setProfile(profData);
-        } else {
-           const locallyProf = await localforage.getItem<UserProfile>('mm_profile');
-           if (locallyProf) {
-              console.log(`[MediaStore] Migrating profile to Supabase...`);
-              const sanitizedProf = { ...locallyProf };
-              if (sanitizedProf.id && !isUUID(sanitizedProf.id)) delete sanitizedProf.id;
-              Object.keys(sanitizedProf).forEach(key => {
-                if (key.startsWith('_') || key.endsWith('_data')) {
-                  delete (sanitizedProf as any)[key];
-                }
-              });
-              const { data: insertedProf, error: insErr } = await activeSupabase.from('profiles').insert(sanitizedProf).select().single();
-              if (insErr) console.error("[MediaStore] Profile migration error:", insErr.message);
-              setProfile(insertedProf || locallyProf);
-           } else {
-              setProfile(null);
-           }
-        }
-
-      } catch (e) {
-        console.error("Supabase load error:", e);
-        await loadFromLocal();
-      }
-    } else {
-      await loadFromLocal();
-    }
-  }
+  const supabase = getSupabase();
 
   useEffect(() => {
-    async function start() {
-      await init();
+    async function init() {
+      if (supabase) {
+        try {
+          const { data: trData } = await supabase.from('tracks').select('*');
+          const { data: plData } = await supabase.from('playlists').select('*');
+          const { data: clData } = await supabase.from('clients').select('*');
+          const { data: slData } = await supabase.from('share_links').select('*');
+          const { data: actData } = await supabase.from('activities').select('*');
+          const { data: msgData } = await supabase.from('messages').select('*');
+          const { data: pvData } = await supabase.from('promo_videos').select('*');
+
+          setTracks(trData || []);
+          setPlaylists(plData || []);
+          setClients(clData || []);
+          setShareLinks(slData || []);
+          setActivities(actData || []);
+          setMessages(msgData || []);
+          setPromoVideos(pvData || []);
+          
+          const { data: profData } = await supabase.from('profiles').select('*').single();
+          setProfile(profData || null);
+        } catch (e) {
+          console.error("Supabase load error:", e);
+          loadFromLocal();
+        }
+      } else {
+        loadFromLocal();
+      }
       setLoading(false);
     }
-    start();
+
+    function loadFromLocal() {
+      const localTracks = localStorage.getItem('mm_tracks');
+      const localPlaylists = localStorage.getItem('mm_playlists');
+      const localClients = localStorage.getItem('mm_clients');
+      const localShareLinks = localStorage.getItem('mm_share_links');
+      const localMessages = localStorage.getItem('mm_messages');
+      const localProfile = localStorage.getItem('mm_profile');
+      
+      let parsedTracks = localTracks ? JSON.parse(localTracks) : [];
+      
+      // Filter out or fix broken blob URLs that don't work after refresh
+      parsedTracks = parsedTracks.map((t: Track) => {
+        if (t.file_url?.startsWith('blob:')) {
+          // In this demo environment, blob URLs don't persist after refresh.
+          // We'll keep the track entry but it will have an error if played.
+          // Ideally, we'd have a persistent storage URL.
+          return { ...t, _brokenBlob: true }; 
+        }
+        return t;
+      });
+
+      // Seed if empty or only broken user tracks exist
+      if (parsedTracks.length === 0 || parsedTracks.every((t: any) => t.id.startsWith('sample-') || t._brokenBlob)) {
+        // We always ensure sample tracks are there and working
+        const sampleTracks: Track[] = [
+          {
+            id: 'sample-1',
+            name: 'Vapor Wave Master',
+            artist: 'OGBeatz',
+            duration: 184,
+            bpm: 128,
+            key_signature: 'Am',
+            tags: ['Vaporwave', 'Electronic', 'Chill'],
+            file_url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+            image_url: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=600&h=600&fit=crop',
+            size: 5000000,
+            type: 'audio/mpeg',
+            plays: 12500,
+            likes: 450,
+            status: 'ready',
+            created_at: new Date().toISOString()
+          },
+          {
+            id: 'sample-2',
+            name: 'Neon Nights Edit',
+            artist: 'OGBeatz',
+            duration: 215,
+            bpm: 95,
+            key_signature: 'F#m',
+            tags: ['Neon', 'Synthwave', 'Upbeat'],
+            file_url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+            image_url: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&h=800&fit=crop',
+            size: 6000000,
+            type: 'audio/mpeg',
+            plays: 8900,
+            likes: 310,
+            status: 'ready',
+            created_at: new Date().toISOString()
+          }
+        ];
+        
+        // Merge samples with existing tracks, prioritizing samples for playback
+        const merged = [...sampleTracks, ...parsedTracks.filter((t: any) => !t.id.startsWith('sample-'))];
+        setTracks(merged);
+        safeSave('mm_tracks', merged);
+      } else {
+        setTracks(parsedTracks);
+      }
+
+      setPlaylists(localPlaylists ? JSON.parse(localPlaylists) : []);
+      setClients(localClients ? JSON.parse(localClients) : []);
+      setMessages(localMessages ? JSON.parse(localMessages) : []);
+      setShareLinks(localShareLinks ? JSON.parse(localShareLinks) : []);
+      setActivities([]);
+      
+      const defaultProfile: UserProfile = {
+        id: 'user-1',
+        name: 'OG Beatz',
+        artist_name: 'OGBeatz',
+        bio: 'Premium sound architecture and master engineering.',
+        email: 'og@beatz.com',
+        avatar_url: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=400&h=400&fit=crop',
+        social_links: {
+          instagram: '@ogbeatz',
+          spotify: 'ogbeatz-official'
+        }
+      };
+      setProfile(localProfile ? JSON.parse(localProfile) : defaultProfile);
+    }
+
+    init();
   }, []);
 
-  const safeSave = async (key: string, data: any) => {
+  const safeSave = (key: string, data: any) => {
     try {
-      await localforage.setItem(key, data);
+      localStorage.setItem(key, JSON.stringify(data));
     } catch (e) {
-      console.warn(`LocalForage save error for ${key}:`, e);
+      console.warn(`LocalStorage save error for ${key}:`, e);
+      if (e instanceof Error && e.name === 'QuotaExceededError') {
+        // If quota exceeded, try to clear non-essential data or just warn
+        // For tracks, maybe remove tracks with large base64 artworks
+        if (key === 'mm_tracks' && Array.isArray(data)) {
+          const reducedData = data.map(t => ({
+            ...t,
+            image_url: t.image_url?.length > 1000 ? '/input_file_2.png' : t.image_url 
+          }));
+          try {
+            localStorage.setItem(key, JSON.stringify(reducedData));
+          } catch (e2) {
+             console.error("Critical storage failure even after reduction", e2);
+          }
+        }
+      }
     }
-    // Express API mock removed - strictly Supabase or Local
   };
 
   const addTrack = async (track: Partial<Track>) => {
@@ -281,18 +216,13 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
       ...track
     };
 
-    setTracks(prev => {
-      const updated = [newTrack, ...prev]; // Latest track at top
-      safeSave('mm_tracks', updated);
-      return updated;
-    });
+    const updated = [...tracks, newTrack];
+    setTracks(updated);
     
     if (supabase) {
-      const dbTrack = { ...newTrack } as any;
-      delete dbTrack.file_data;
-      delete dbTrack.image_data;
-      const { error } = await supabase.from('tracks').insert(dbTrack);
-      if (error) console.error(error);
+      await supabase.from('tracks').insert(newTrack);
+    } else {
+      safeSave('mm_tracks', updated);
     }
 
     addActivity({
@@ -307,135 +237,83 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
   };
 
   const updateTrack = async (id: string, updates: Partial<Track>) => {
-    setTracks(prev => {
-      const updated = prev.map(t => t.id === id ? { ...t, ...updates } : t);
-      safeSave('mm_tracks', updated);
-      return updated;
-    });
-    
+    const updated = tracks.map(t => t.id === id ? { ...t, ...updates } : t);
+    setTracks(updated);
     if (supabase) {
-      const dbUpdates = { ...updates } as any;
-      delete dbUpdates.file_data;
-      delete dbUpdates.image_data;
-      const { error } = await supabase.from('tracks').update(dbUpdates).eq('id', id);
-      if (error) console.error(error);
+      await supabase.from('tracks').update(updates).eq('id', id);
+    } else {
+      safeSave('mm_tracks', updated);
     }
   };
 
   const deleteTrack = async (id: string) => {
-    console.log(`[MediaStore] Initializing deletion for track: ${id}`);
-    try {
-      // 1. Update React states using functional updates to ensure consistency
-      setTracks(prev => prev.filter(t => t.id !== id));
-      setPlaylists(prev => prev.map(pl => ({
-        ...pl,
-        track_ids: (pl.track_ids || []).filter(tid => tid !== id)
-      })));
-      setPromoVideos(prev => prev.filter(v => v.track_id !== id));
-      setShareLinks(prev => prev.filter(l => l.track_id !== id));
+    const updatedTracks = tracks.filter(t => t.id !== id);
+    setTracks(updatedTracks);
+    
+    // Cascading delete: remove from playlists
+    const updatedPlaylists = playlists.map(pl => ({
+      ...pl,
+      track_ids: pl.track_ids.filter(tid => tid !== id)
+    }));
+    setPlaylists(updatedPlaylists);
 
-      // 2. Persist to local storage (or DB if available)
-      if (supabase) {
-        await Promise.all([
-          supabase.from('share_links').delete().eq('track_id', id),
-          supabase.from('promo_videos').delete().eq('track_id', id),
-          supabase.from('tracks').delete().eq('id', id)
-        ]);
-      } else {
-        // Compute and save to local storage immediately
-        const localTracks = await localforage.getItem<any[]>('mm_tracks') || [];
-        await safeSave('mm_tracks', localTracks.filter((t: any) => t.id !== id));
-        
-        const localPlaylists = await localforage.getItem<any[]>('mm_playlists') || [];
-        await safeSave('mm_playlists', localPlaylists.map((pl: any) => ({
-          ...pl,
-          track_ids: (pl.track_ids || []).filter((tid: any) => tid !== id)
-        })));
-        
-        const localVideos = await localforage.getItem<any[]>('mm_promo_videos') || [];
-        await safeSave('mm_promo_videos', localVideos.filter((v: any) => v.track_id !== id));
-        
-        const localLinks = await localforage.getItem<any[]>('mm_share_links') || [];
-        await safeSave('mm_share_links', localLinks.filter((l: any) => l.track_id !== id));
-      }
-
-      addActivity({
-        type: 'system',
-        user: 'OGBeatz',
-        action: `Purged asset ${id} from reference library`,
-        timestamp: new Date().toISOString()
-      });
-      
-      console.log(`[MediaStore] Successfully deleted track: ${id}`);
-    } catch (error) {
-      console.error("[MediaStore] Deletion Failure:", error);
-      alert("Terminal delete operation failed. Please check network connectivity or permissions.");
+    if (supabase) {
+      await supabase.from('tracks').delete().eq('id', id);
+      // Supabase should handle the relational part if schema is right, but manually updating state here
+    } else {
+      safeSave('mm_tracks', updatedTracks);
+      safeSave('mm_playlists', updatedPlaylists);
     }
+
+    addActivity({
+      type: 'system',
+      user: 'OGBeatz',
+      action: `Deleted track ${id}`,
+      timestamp: new Date().toISOString()
+    });
   };
 
   const addTrackToPlaylist = async (trackId: string, playlistId: string) => {
-    let newTrackIds: string[] = [];
-    setPlaylists(prev => {
-      const updated = prev.map(pl => {
-        if (pl.id === playlistId) {
-          if (pl.track_ids.includes(trackId)) return pl;
-          newTrackIds = [...pl.track_ids, trackId];
-          return { ...pl, track_ids: newTrackIds };
-        }
-        return pl;
-      });
-      safeSave('mm_playlists', updated);
-      return updated;
+    const updated = playlists.map(pl => {
+      if (pl.id === playlistId) {
+        if (pl.track_ids.includes(trackId)) return pl;
+        return { ...pl, track_ids: [...pl.track_ids, trackId] };
+      }
+      return pl;
     });
-    
-    if (supabase && newTrackIds.length > 0) {
-      const { error } = await supabase.from('playlists').update({ track_ids: newTrackIds }).eq('id', playlistId);
-      if (error) console.error(error);
-    }
+    setPlaylists(updated);
+    if (!supabase) safeSave('mm_playlists', updated);
   };
 
   const removeTrackFromPlaylist = async (trackId: string, playlistId: string) => {
-    let newTrackIds: string[] = [];
-    setPlaylists(prev => {
-      const updated = prev.map(pl => {
-        if (pl.id === playlistId) {
-          newTrackIds = pl.track_ids.filter(tid => tid !== trackId);
-          return { ...pl, track_ids: newTrackIds };
-        }
-        return pl;
-      });
-      safeSave('mm_playlists', updated);
-      return updated;
+    const updated = playlists.map(pl => {
+      if (pl.id === playlistId) {
+        return { ...pl, track_ids: pl.track_ids.filter(tid => tid !== trackId) };
+      }
+      return pl;
     });
-    
-    if (supabase) {
-      const { error } = await supabase.from('playlists').update({ track_ids: newTrackIds }).eq('id', playlistId);
-      if (error) console.error(error);
-    }
+    setPlaylists(updated);
+    if (!supabase) safeSave('mm_playlists', updated);
+    else await supabase.from('playlists').update({ track_ids: updated.find(p => p.id === playlistId)?.track_ids }).eq('id', playlistId);
   };
 
   const updatePlaylist = async (id: string, updates: Partial<Playlist>) => {
-    setPlaylists(prev => {
-      const updated = prev.map(pl => pl.id === id ? { ...pl, ...updates } : pl);
-      safeSave('mm_playlists', updated);
-      return updated;
-    });
-    
+    const updated = playlists.map(pl => pl.id === id ? { ...pl, ...updates } : pl);
+    setPlaylists(updated);
     if (supabase) {
-      const { error } = await supabase.from('playlists').update(updates).eq('id', id);
-      if (error) console.error(error);
+      await supabase.from('playlists').update(updates).eq('id', id);
+    } else {
+      safeSave('mm_playlists', updated);
     }
   };
 
   const deletePlaylist = async (id: string) => {
-    setPlaylists(prev => {
-      const updated = prev.filter(pl => pl.id !== id);
-      safeSave('mm_playlists', updated);
-      return updated;
-    });
+    const updated = playlists.filter(pl => pl.id !== id);
+    setPlaylists(updated);
     if (supabase) {
-      const { error } = await supabase.from('playlists').delete().eq('id', id);
-      if (error) console.error(error);
+      await supabase.from('playlists').delete().eq('id', id);
+    } else {
+      safeSave('mm_playlists', updated);
     }
   };
 
@@ -450,21 +328,35 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
       end_color: playlist.end_color || "#ea580c",
       created_at: new Date().toISOString()
     };
-    setPlaylists(prev => {
-      const updated = [...prev, newPl];
-      safeSave('mm_playlists', updated);
-      return updated;
-    });
-    if (supabase) {
-      const { error } = await supabase.from('playlists').insert(newPl);
-      if (error) console.error(error);
-    }
+    const updated = [...playlists, newPl];
+    setPlaylists(updated);
+    if (!supabase) safeSave('mm_playlists', updated);
   };
 
   const addClient = async (client: Partial<Client>) => {
     const rawEmail = client.email || "unknown@client.com";
     const normalizedEmail = rawEmail.trim().toLowerCase();
     
+    // Check if email already exists
+    const existingClient = clients.find(c => c.email.toLowerCase() === normalizedEmail);
+    
+    if (existingClient) {
+      // Merge logic: Update name if provided, set status to online
+      const updates = {
+        name: client.name || existingClient.name,
+        status: 'online' as const,
+        last_active: new Date().toISOString(),
+      };
+      const updatedClients = clients.map(c => c.id === existingClient.id ? { ...c, ...updates } : c);
+      setClients(updatedClients);
+      if (supabase) {
+        await supabase.from('clients').update(updates).eq('id', existingClient.id);
+      } else {
+        safeSave('mm_clients', updatedClients);
+      }
+      return;
+    }
+
     // Helper to derive name from email
     const deriveDisplayNameFromEmail = (email: string) => {
       const localPart = email.split('@')[0];
@@ -474,71 +366,42 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
         .join(' ');
     };
 
-    let existingId: string | null = null;
-    let updatesToApply: any = null;
-    let newClientToInsert: Client | null = null;
-
-    setClients(prev => {
-      const existingClient = prev.find(c => c.email.toLowerCase() === normalizedEmail);
-      if (existingClient) {
-        existingId = existingClient.id;
-        updatesToApply = {
-          name: client.name || existingClient.name,
-          status: 'online' as const,
-          last_active: new Date().toISOString(),
-        };
-        const updatedClients = prev.map(c => c.id === existingClient.id ? { ...c, ...updatesToApply } : c);
-        safeSave('mm_clients', updatedClients);
-        return updatedClients;
-      } else {
-        newClientToInsert = {
-          id: uuidv4(),
-          name: client.name || deriveDisplayNameFromEmail(normalizedEmail),
-          email: normalizedEmail,
-          status: client.status || "online",
-          last_active: new Date().toISOString(),
-          tags: client.tags || [],
-          created_at: new Date().toISOString(),
-          ...client
-        };
-        const updated = [...prev, newClientToInsert];
-        safeSave('mm_clients', updated);
-        return updated;
-      }
-    });
-
+    const newClient: Client = {
+      id: uuidv4(),
+      name: client.name || deriveDisplayNameFromEmail(normalizedEmail),
+      email: normalizedEmail,
+      status: client.status || "online",
+      last_active: new Date().toISOString(),
+      tags: client.tags || [],
+      created_at: new Date().toISOString(),
+      ...client
+    };
+    const updated = [...clients, newClient];
+    setClients(updated);
     if (supabase) {
-      if (existingId && updatesToApply) {
-        const { error } = await supabase.from('clients').update(updatesToApply).eq('id', existingId);
-        if (error) console.error(error);
-      } else if (newClientToInsert) {
-        const { error } = await supabase.from('clients').insert(newClientToInsert);
-        if (error) console.error(error);
-      }
+      await supabase.from('clients').insert(newClient);
+    } else {
+      safeSave('mm_clients', updated);
     }
   };
 
   const updateClient = async (id: string, updates: Partial<Client>) => {
-    setClients(prev => {
-      const updated = prev.map(c => c.id === id ? { ...c, ...updates } : c);
-      safeSave('mm_clients', updated);
-      return updated;
-    });
+    const updated = clients.map(c => c.id === id ? { ...c, ...updates } : c);
+    setClients(updated);
     if (supabase) {
-      const { error } = await supabase.from('clients').update(updates).eq('id', id);
-      if (error) console.error(error);
+      await supabase.from('clients').update(updates).eq('id', id);
+    } else {
+      safeSave('mm_clients', updated);
     }
   };
 
   const deleteClient = async (id: string) => {
-    setClients(prev => {
-      const updated = prev.filter(c => c.id !== id);
-      safeSave('mm_clients', updated);
-      return updated;
-    });
+    const updated = clients.filter(c => c.id !== id);
+    setClients(updated);
     if (supabase) {
-      const { error } = await supabase.from('clients').delete().eq('id', id);
-      if (error) console.error(error);
+      await supabase.from('clients').delete().eq('id', id);
+    } else {
+      safeSave('mm_clients', updated);
     }
     
     // Also cleanup activity references if needed, or just let them stay with null references
@@ -551,49 +414,34 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
   };
 
   const sendMessage = async (clientId: string, content: string, image_url?: string | null) => {
-    // We don't have direct access to clients array here without putting it in prev wrapper,
-    // so let's just create the message and update messages array.
+    const client = clients.find(c => c.id === clientId);
+    if (!client) return;
+
     const newMessage: Message = {
       id: uuidv4(),
       client_id: clientId,
-      // We will look up the email below
-      recipient_id: '',
+      recipient_id: client.email,
       content,
       image_url: image_url || null,
       direction: 'outbound',
       timestamp: new Date().toISOString(),
       is_read: false
     };
-
-    let clientName = 'Client';
-
-    setClients(prevClients => {
-      const client = prevClients.find(c => c.id === clientId);
-      if (client) {
-        newMessage.recipient_id = client.email;
-        clientName = client.name;
-      }
-      return prevClients;
-    });
     
-    if (!newMessage.recipient_id) return; // Client not found
-
-    setMessages(prev => {
-      const updated = [...prev, newMessage];
-      safeSave('mm_messages', updated);
-      return updated;
-    });
-
+    const updated = [...messages, newMessage];
+    setMessages(updated);
+    
     if (supabase) {
-      const { error } = await supabase.from('messages').insert(newMessage);
-      if (error) console.error(error);
+      await supabase.from('messages').insert(newMessage);
+    } else {
+      safeSave('mm_messages', updated);
     }
 
     // Also add to activity log
     addActivity({
       type: 'social',
       user: 'OGBeatz',
-      action: `Sent message to ${clientName}`,
+      action: `Sent message to ${client?.name || 'Client'}`,
       details: content,
       client_id: clientId
     });
@@ -603,10 +451,10 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     if (!profile) return;
     const updated = { ...profile, ...updates };
     setProfile(updated);
-    safeSave('mm_profile', updated);
     if (supabase) {
-      const { error } = await supabase.from('profiles').update(updates).eq('id', profile.id);
-      if (error) console.error(error);
+      await supabase.from('profiles').update(updates).eq('id', profile.id);
+    } else {
+      safeSave('mm_profile', updated);
     }
   };
 
@@ -625,77 +473,15 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
       created_at: new Date().toISOString(),
       ...link
     };
-    
-    setShareLinks(prev => {
-      const updated = [...prev, newLink];
-      safeSave('mm_share_links', updated);
-      return updated;
-    });
-
+    const updated = [...shareLinks, newLink];
+    setShareLinks(updated);
     if (supabase) {
-      const { error } = await supabase.from('share_links').insert(newLink);
-      if (error) console.error(error);
+      await supabase.from('share_links').insert(newLink);
+    } else {
+      safeSave('mm_share_links', updated);
     }
     return newLink;
   };
-
-  const getShareContent = React.useCallback(async (token: string) => {
-    if (!supabase) return null;
-
-    try {
-      // 1. Fetch the share link
-      const { data: linkData, error: linkError } = await supabase
-        .from('share_links')
-        .select('*')
-        .eq('token', token)
-        .single();
-
-      if (linkError || !linkData) return null;
-
-      const link = linkData as ShareLink;
-
-      // 2. Fetch the target asset
-      let track: Track | undefined;
-      let playlist: Playlist | undefined;
-
-      if (link.track_id) {
-        const { data: tr } = await supabase
-          .from('tracks')
-          .select('*')
-          .eq('id', link.track_id)
-          .single();
-        if (tr) track = tr as Track;
-      } else if (link.playlist_id) {
-        const { data: pl } = await supabase
-          .from('playlists')
-          .select('*')
-          .eq('id', link.playlist_id)
-          .single();
-        
-        if (pl) {
-           playlist = pl as Playlist;
-           // Also fetch tracks inside the playlist if they aren't loaded
-           const { data: playlistTracks } = await supabase
-             .from('tracks')
-             .select('*')
-             .in('id', playlist.track_ids);
-           
-           if (playlistTracks) {
-              // Merge into global tracks if not already present
-              setTracks(prev => {
-                const uniqueNew = playlistTracks.filter(nt => !prev.some(et => et.id === nt.id));
-                return [...prev, ...uniqueNew];
-              });
-           }
-        }
-      }
-
-      return { track, playlist, link };
-    } catch (e) {
-      console.error("getShareContent Failure:", e);
-      return null;
-    }
-  }, []);
 
   const addActivity = async (activity: Partial<Activity>) => {
     const newActivity: Activity = {
@@ -706,49 +492,17 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
       timestamp: new Date().toISOString(),
       ...activity
     };
-    setActivities(prev => {
-      const updated = [newActivity, ...prev].slice(0, 50); // Keep last 50
-      safeSave('mm_activities', updated);
-      return updated;
-    });
+    const updated = [newActivity, ...activities].slice(0, 50); // Keep last 50
+    setActivities(updated);
     if (supabase) {
-      const { error } = await supabase.from('activities').insert(newActivity);
-      if (error) console.error(error);
+      await supabase.from('activities').insert(newActivity);
+    } else {
+      safeSave('mm_activities', updated);
     }
   };
 
-  const deleteActivity = async (id: string) => {
-    setActivities(prev => {
-      const updated = prev.filter(a => a.id !== id);
-      safeSave('mm_activities', updated);
-      return updated;
-    });
-    if (supabase) {
-      const { error } = await supabase.from('activities').delete().eq('id', id);
-      if (error) console.error(error);
-    }
-  };
-
-  const incrementShareLinkAccess = async (id: string) => {
-    let newCount = 0;
-    setShareLinks(prev => {
-      const link = prev.find(l => l.id === id);
-      if (!link) return prev;
-      newCount = (link.access_count || 0) + 1;
-      const updated = prev.map(l => 
-        l.id === id ? { ...l, access_count: newCount } : l
-      );
-      safeSave('mm_share_links', updated);
-      return updated;
-    });
-    
-    if (supabase && newCount > 0) {
-      const { error } = await supabase
-        .from('share_links')
-        .update({ access_count: newCount })
-        .eq('id', id);
-      if (error) console.error(error);
-    }
+  const deleteActivity = (id: string) => {
+    // ...
   };
 
   const addPromoVideo = async (video: Partial<PromoVideo>) => {
@@ -761,66 +515,63 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
       created_at: new Date().toISOString(),
       ...video
     };
-    setPromoVideos(prev => {
-      const updated = [...prev, newVideo];
-      safeSave('mm_promo_videos', updated);
-      return updated;
-    });
+    const updated = [...promoVideos, newVideo];
+    setPromoVideos(updated);
     if (supabase) {
-      const { error } = await supabase.from('promo_videos').insert(newVideo);
-      if (error) console.error(error);
+      await supabase.from('promo_videos').insert(newVideo);
+    } else {
+      safeSave('mm_promo_videos', updated);
     }
   };
 
   const deletePromoVideo = async (id: string) => {
-    setPromoVideos(prev => {
-      const updated = prev.filter(v => v.id !== id);
-      safeSave('mm_promo_videos', updated);
-      return updated;
-    });
+    const updated = promoVideos.filter(v => v.id !== id);
+    setPromoVideos(updated);
     if (supabase) {
-      const { error } = await supabase.from('promo_videos').delete().eq('id', id);
-      if (error) console.error(error);
+      await supabase.from('promo_videos').delete().eq('id', id);
+    } else {
+      safeSave('mm_promo_videos', updated);
     }
   };
 
   const analyzeTrack = async (name: string): Promise<{ bpm: number, key: string, duration?: number, tags?: string[] }> => {
     try {
-      const response = await fetch("/api/analyze-metadata", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName: name }),
+      const { GoogleGenAI, Type } = await import('@google/genai');
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Analyze this music track name: "${name}". Suggest its likely BPM (number), Key Signature (string like "Am", "F#m", "C"), approximate duration in seconds, and 3-5 descriptive tags (genres/moods). Return as JSON.`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              bpm: { type: Type.NUMBER },
+              key: { type: Type.STRING },
+              duration: { type: Type.NUMBER },
+              tags: { 
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              }
+            },
+            required: ["bpm", "key", "tags"]
+          }
+        }
       });
       
-      if (!response.ok) throw new Error("Server analysis failed");
-      
-      return await response.json();
+      return JSON.parse(response.text.trim());
     } catch (e) {
       console.error("AI Analysis failed:", e);
       return { bpm: 120, key: "C", tags: [] };
     }
   };
 
-  const refreshSync = async () => {
-    setLoading(true);
-    await init();
-    setLoading(false);
-  };
-
-  const clearLocalCache = async () => {
-    await localforage.clear();
-    window.location.reload();
-  };
-
   return (
     <MediaStoreContext.Provider value={{
       tracks, playlists, clients, activities, profile, loading, shareLinks, messages, promoVideos,
       addTrack, updateTrack, deleteTrack, addPlaylist, updatePlaylist, deletePlaylist, addTrackToPlaylist, removeTrackFromPlaylist,
-      addClient, updateClient, deleteClient, updateProfile, addShareLink, getShareContent, addActivity, analyzeTrack, sendMessage, addPromoVideo, deletePromoVideo, incrementShareLinkAccess,
-      refreshSync,
-      isSupabaseConfigured,
-      // @ts-ignore
-      clearLocalCache
+      addClient, updateClient, deleteClient, updateProfile, addShareLink, addActivity, analyzeTrack, sendMessage, addPromoVideo, deletePromoVideo
     }}>
       {children}
     </MediaStoreContext.Provider>

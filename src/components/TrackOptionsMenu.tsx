@@ -10,8 +10,8 @@ import {
   Video
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { cn } from "../lib/utils";
-import { Track } from "../types";
+import { cn } from "@/src/lib/utils";
+import { Track } from "@/src/types";
 
 interface TrackOptionsMenuProps {
   track: Track;

@@ -1,21 +1,20 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 
-const url = (import.meta as any).env.VITE_SUPABASE_URL || (import.meta as any).env.SUPABASE_URL || process.env.SUPABASE_URL;
-const key = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || (import.meta as any).env.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-
-export let supabase: SupabaseClient | null = (url && key) 
-  ? createClient(url, key)
-  : null;
-
-export function initSupabase(newUrl: string, newKey: string) {
-  if (newUrl && newKey) {
-    supabase = createClient(newUrl, newKey);
-    return supabase;
-  }
-  return null;
-}
+let supabaseInstance: any = null;
 
 export function getSupabase() {
-  return supabase;
-}
+  if (supabaseInstance) return supabaseInstance;
 
+  const url = (import.meta as any).env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const key = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+
+  console.log('Supabase Check:', { hasUrl: !!url, hasKey: !!key });
+
+  if (!url || !key || url.includes('your-project') || key.includes('your-anon-key')) {
+    console.warn('Supabase credentials missing or default placeholder used. Using local fallback.');
+    return null;
+  }
+
+  supabaseInstance = createClient(url, key);
+  return supabaseInstance;
+}

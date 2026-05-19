@@ -18,7 +18,6 @@ CREATE TABLE IF NOT EXISTS tracks (
   type TEXT NOT NULL DEFAULT 'audio/mpeg',
   plays INTEGER NOT NULL DEFAULT 0,
   likes INTEGER NOT NULL DEFAULT 0,
-  tags TEXT[] DEFAULT '{}',
   status TEXT NOT NULL CHECK (status IN ('ready', 'sent', 'processing')) DEFAULT 'processing',
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -31,7 +30,6 @@ CREATE TABLE IF NOT EXISTS playlists (
   track_ids UUID[] DEFAULT '{}',
   start_color TEXT DEFAULT '#f97316',
   end_color TEXT DEFAULT '#ea580c',
-  image_url TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -44,8 +42,7 @@ CREATE TABLE IF NOT EXISTS clients (
   company TEXT,
   status TEXT CHECK (status IN ('online', 'offline')) DEFAULT 'offline',
   last_active TIMESTAMPTZ DEFAULT NOW(),
-  tags TEXT[] DEFAULT '{}',
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  tags TEXT[] DEFAULT '{}'
 );
 
 -- Share Links Table
@@ -55,7 +52,6 @@ CREATE TABLE IF NOT EXISTS share_links (
   track_id UUID REFERENCES tracks(id) ON DELETE CASCADE,
   playlist_id UUID REFERENCES playlists(id) ON DELETE CASCADE,
   client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
-  recipient_email TEXT,
   download_enabled BOOLEAN DEFAULT true,
   expires_at TIMESTAMPTZ,
   access_count INTEGER DEFAULT 0,
@@ -65,13 +61,9 @@ CREATE TABLE IF NOT EXISTS share_links (
 -- Activity Table
 CREATE TABLE IF NOT EXISTS activities (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  type TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('view', 'play', 'download', 'like', 'comment')),
   track_id UUID REFERENCES tracks(id) ON DELETE SET NULL,
-  playlist_id UUID REFERENCES playlists(id) ON DELETE SET NULL,
   client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
-  "user" TEXT,
-  action TEXT,
-  target TEXT,
   details TEXT,
   timestamp TIMESTAMPTZ DEFAULT NOW()
 );
@@ -88,39 +80,6 @@ CREATE TABLE IF NOT EXISTS messages (
   is_read BOOLEAN DEFAULT false
 );
 
--- Promo Videos Table
-CREATE TABLE IF NOT EXISTS promo_videos (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  track_id UUID REFERENCES tracks(id) ON DELETE CASCADE,
-  playlist_id UUID REFERENCES playlists(id) ON DELETE CASCADE,
-  video_url TEXT NOT NULL,
-  thumbnail_url TEXT,
-  style TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('processing', 'ready', 'failed')) DEFAULT 'processing',
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Promo Packs Table
-CREATE TABLE IF NOT EXISTS promo_packs (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  track_id UUID REFERENCES tracks(id) ON DELETE CASCADE,
-  youtube_copy TEXT,
-  instagram_copy TEXT,
-  generic_copy TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Profiles Table
-CREATE TABLE IF NOT EXISTS profiles (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name TEXT,
-  artist_name TEXT,
-  bio TEXT,
-  email TEXT,
-  avatar_url TEXT,
-  social_links JSONB DEFAULT '{}'::jsonb
-);
-
 -- Enable RLS
 ALTER TABLE tracks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE playlists ENABLE ROW LEVEL SECURITY;
@@ -128,9 +87,6 @@ ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
 ALTER TABLE share_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE promo_videos ENABLE ROW LEVEL SECURITY;
-ALTER TABLE promo_packs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
 -- Public Policies (Using DO block to avoid 'already exists' errors)
 DO $$
@@ -153,13 +109,25 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access' AND tablename = 'messages') THEN
         CREATE POLICY "Public Access" ON messages FOR ALL USING (true) WITH CHECK (true);
     END IF;
+END $$;
+
+-- Promo Videos Table
+CREATE TABLE IF NOT EXISTS promo_videos (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  track_id UUID REFERENCES tracks(id) ON DELETE CASCADE,
+  playlist_id UUID REFERENCES playlists(id) ON DELETE CASCADE,
+  video_url TEXT NOT NULL,
+  thumbnail_url TEXT,
+  style TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('processing', 'ready', 'failed')) DEFAULT 'processing',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE promo_videos ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access' AND tablename = 'promo_videos') THEN
         CREATE POLICY "Public Access" ON promo_videos FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access' AND tablename = 'promo_packs') THEN
-        CREATE POLICY "Public Access" ON promo_packs FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access' AND tablename = 'profiles') THEN
-        CREATE POLICY "Public Access" ON profiles FOR ALL USING (true) WITH CHECK (true);
     END IF;
 END $$;
