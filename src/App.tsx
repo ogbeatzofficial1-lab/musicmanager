@@ -29,24 +29,9 @@ import {
   X,
   Trash2,
   Edit3,
-  Video,
-  AlertCircle,
-  Eye,
-  BarChart3
+  Video
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  Cell
-} from 'recharts';
 import { useMediaStore } from './context/MediaStoreContext';
 import { useAudio } from './context/AudioContext';
 import Shell from './components/Shell';
@@ -73,7 +58,6 @@ export default function App() {
   const [selectedMessageClientId, setSelectedMessageClientId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [clientSearchQuery, setClientSearchQuery] = useState('');
-  const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]);
   const [selectedTrackForPromo, setSelectedTrackForPromo] = useState<Track | null>(null);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [editingPlaylist, setEditingPlaylist] = useState<Playlist | null>(null);
@@ -88,8 +72,6 @@ export default function App() {
   const [showAddClient, setShowAddClient] = useState(false);
   const [clientMessageDraft, setClientMessageDraft] = useState('');
   const [chatAttachment, setChatAttachment] = useState<string | null>(null);
-  const [asyncSharedContent, setAsyncSharedContent] = useState<{ track?: Track, playlist?: Playlist, link: ShareLink } | null>(null);
-  const [shareError, setShareError] = useState<string | null>(null);
 
   const [showCreatePlaylist, setShowCreatePlaylist] = useState(false);
   const [showAddTracksToPlaylist, setShowAddTracksToPlaylist] = useState(false);
@@ -98,7 +80,7 @@ export default function App() {
     tracks, playlists, clients, activities, messages, profile, loading, shareLinks, promoVideos,
     deleteTrack, updateTrack, addPlaylist, updatePlaylist, deletePlaylist, 
     addTrackToPlaylist, removeTrackFromPlaylist, addClient, updateClient, deleteClient, 
-    updateProfile, addShareLink, addActivity, sendMessage, incrementShareLinkAccess, getShareContent
+    updateProfile, addShareLink, addActivity, sendMessage, incrementShareLinkAccess 
   } = useMediaStore();
   const hasIncrementedRef = React.useRef<string | null>(null);
 
@@ -107,45 +89,6 @@ export default function App() {
 
   const { stop, playTrack, activeTrack } = useAudio();
   
-  // Fetch Shared Content for Anon Users
-  useEffect(() => {
-    if (shareToken && !loading) {
-       const fetchShared = async () => {
-          const content = await getShareContent(shareToken);
-          if (content) {
-             setAsyncSharedContent(content);
-          } else {
-             setShareError("Invalid or unauthorized share token.");
-          }
-       };
-       fetchShared();
-    }
-  }, [shareToken, loading, getShareContent]);
-  
-  // Analytics Logic
-  const stats = useMemo(() => {
-    const totalPlays = tracks.reduce((acc, t) => acc + (t.plays || 0), 0);
-    const totalLikes = tracks.reduce((acc, t) => acc + (t.likes || 0), 0);
-    const engagementRate = totalPlays > 0 ? (totalLikes / totalPlays) * 100 : 0;
-    
-    return {
-      totalTracks: tracks.length,
-      activeClients: clients.length,
-      totalPlays,
-      engagementRate: engagementRate.toFixed(1) + '%'
-    };
-  }, [tracks, clients]);
-
-  const chartData = useMemo(() => [
-    { name: 'Mon', plays: 400, engagement: 240 },
-    { name: 'Tue', plays: 300, engagement: 139 },
-    { name: 'Wed', plays: 200, engagement: 980 },
-    { name: 'Thu', plays: 278, engagement: 390 },
-    { name: 'Fri', plays: 189, engagement: 480 },
-    { name: 'Sat', plays: 239, engagement: 380 },
-    { name: 'Sun', plays: 349, engagement: 430 },
-  ], []);
-
   const filteredClients = useMemo(() => {
     return clients.filter(c => 
       c.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
@@ -162,39 +105,6 @@ export default function App() {
 
   const handleImportClients = () => {
     fileInputRef.current?.click();
-  };
-
-  const toggleClientSelection = (id: string) => {
-    setSelectedClientIds(prev => 
-      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
-    );
-  };
-
-  const handleBulkStatusUpdate = async (status: 'online' | 'offline' | 'away') => {
-    for (const id of selectedClientIds) {
-      await updateClient(id, { status });
-    }
-    setSelectedClientIds([]);
-  };
-
-  const handleBulkDelete = async () => {
-    if (!confirm(`Are you sure you want to delete ${selectedClientIds.length} partners?`)) return;
-    for (const id of selectedClientIds) {
-      await deleteClient(id);
-    }
-    setSelectedClientIds([]);
-  };
-
-  const handleBulkTagAdd = async () => {
-    const tag = prompt("Enter tag to assign to selected partners:");
-    if (!tag) return;
-    for (const id of selectedClientIds) {
-      const client = clients.find(c => c.id === id);
-      if (client && !client.tags.includes(tag)) {
-        await updateClient(id, { tags: [...client.tags, tag] });
-      }
-    }
-    setSelectedClientIds([]);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -389,13 +299,10 @@ export default function App() {
   }, [sharedContent, incrementShareLinkAccess]);
 
   if (shareToken) {
-    const displayContent = sharedContent?.link ? sharedContent : asyncSharedContent;
-
-    if (displayContent && displayContent.link) {
-      return <SharePortal track={displayContent.track} playlist={displayContent.playlist} shareLink={displayContent.link} />;
+    if (sharedContent && sharedContent.link) {
+      return <SharePortal track={sharedContent.track} playlist={sharedContent.playlist} shareLink={sharedContent.link} />;
     }
-    
-    if (loading || (!asyncSharedContent && !shareError)) {
+    if (loading) {
       return (
         <div className="min-h-screen bg-black flex flex-col items-center justify-center space-y-6">
           <div className="w-16 h-16 rounded-[2rem] bg-zinc-900 border border-zinc-800 flex items-center justify-center">
@@ -418,7 +325,7 @@ export default function App() {
         <div className="text-center space-y-4 max-w-md">
           <h2 className="text-3xl font-black italic uppercase tracking-tighter">Access Token Invalid</h2>
           <p className="text-zinc-500 text-sm font-medium">
-             {sharedContent?.expired ? "This share link has expired and self-destructed. Please request a new reference link from the producer." : (shareError || "This share link is invalid or has been revoked by the production team.")}
+             {sharedContent?.expired ? "This share link has expired and self-destructed. Please request a new reference link from the producer." : "This share link is invalid or has been revoked by the production team."}
           </p>
         </div>
         <button 
@@ -535,7 +442,7 @@ export default function App() {
   const renderDashboard = () => (
     <div className="p-8 space-y-8">
       {/* Header Area */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-black tracking-tight uppercase">Dashboard</h1>
           <p className="text-zinc-500 text-sm font-medium">Welcome back, OG. Here's what's happening today.</p>
@@ -557,95 +464,29 @@ export default function App() {
         </div>
       </div>
 
-      {/* Analytics Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[
-          { label: 'Total Tracks', value: stats.totalTracks, icon: Music, trend: '+12%', color: 'text-orange-500' },
-          { label: 'Active Clients', value: stats.activeClients, icon: Users, trend: '+5%', color: 'text-blue-500' },
-          { label: 'Total Plays', value: stats.totalPlays.toLocaleString(), icon: Play, trend: '+18.2%', color: 'text-emerald-500' },
-          { label: 'Engagement', value: stats.engagementRate, icon: TrendingUp, trend: '+2.4%', color: 'text-purple-500' },
-        ].map((stat, i) => (
-          <motion.div 
-            key={stat.label}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.1 }}
-            className="bg-zinc-950 border border-zinc-900 p-6 rounded-[2rem] hover:border-zinc-800 transition-all group"
-          >
-            <div className="flex items-center justify-between mb-4">
-              <div className={cn("w-10 h-10 rounded-xl bg-zinc-900 flex items-center justify-center border border-zinc-800 group-hover:scale-110 transition-transform", stat.color)}>
-                <stat.icon className="w-5 h-5" />
-              </div>
-              <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded-md">{stat.trend}</span>
-            </div>
-            <div className="space-y-1">
-              <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest">{stat.label}</p>
-              <h3 className="text-2xl font-black">{stat.value}</h3>
-            </div>
-          </motion.div>
-        ))}
+      {/* Hero Branding Section */}
+      <div className="relative h-72 rounded-[3rem] overflow-hidden border border-zinc-900 group">
+        <img 
+          src="/input_file_0.png" 
+          className="absolute inset-0 w-full h-full object-cover transition-transform duration-[30s] group-hover:scale-110" 
+          alt="Dashboard Hero" 
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-black via-black/40 to-transparent" />
+        <div className="relative h-full flex flex-col justify-center px-12 space-y-4">
+          <h1 className="text-6xl font-black tracking-tighter leading-none italic uppercase">OGBEATZ HUB</h1>
+          <p className="text-zinc-200 font-medium text-lg max-w-xl leading-relaxed">
+            Manage tracks, playlists, clients, shares, and activity from one place.
+          </p>
+        </div>
       </div>
 
-      {/* Main Stats Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Performance Chart */}
-        <div className="lg:col-span-2 bg-zinc-950 border border-zinc-900 rounded-[2.5rem] p-8 space-y-8">
-          <div className="flex items-center justify-between">
-             <div>
-                <h2 className="text-xl font-black tracking-tight uppercase">Performance Overview</h2>
-                <p className="text-zinc-500 text-xs font-black uppercase tracking-widest mt-1">Play trends vs Engagement metrics</p>
-             </div>
-             <select className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest outline-none">
-                <option>Last 7 Days</option>
-                <option>Last 30 Days</option>
-             </select>
-          </div>
-          
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorPlays" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#18181b" />
-                <XAxis 
-                  dataKey="name" 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#52525b', fontSize: 10, fontWeight: 900 }}
-                  dy={10}
-                />
-                <YAxis 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#52525b', fontSize: 10, fontWeight: 900 }}
-                />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#09090b', border: '1px solid #18181b', borderRadius: '12px' }}
-                  itemStyle={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase' }}
-                  labelStyle={{ display: 'none' }}
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="plays" 
-                  stroke="#f97316" 
-                  strokeWidth={3}
-                  fillOpacity={1} 
-                  fill="url(#colorPlays)" 
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Quick Recent Activity */}
+      {/* Dashboard Content */}
+      <div className="grid grid-cols-1 gap-6">
+          {/* Recent Activity */}
         <div className="bg-zinc-950 border border-zinc-900 rounded-[2.5rem] p-8 flex flex-col">
-          <h2 className="text-xl font-black tracking-tight uppercase mb-8">Pulse Feed</h2>
-          <div className="space-y-6 flex-1 overflow-y-auto max-h-[350px] pr-2 scrollbar-hide">
-             {activities.slice().sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 8).map((act) => {
+          <h2 className="text-xl font-black tracking-tight uppercase mb-8">Recent Activity</h2>
+          <div className="space-y-6 flex-1 overflow-y-auto max-h-[600px] pr-2 scrollbar-hide">
+             {activities.slice().sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 20).map((act) => {
                const { Icon, color, bg } = getActivityIcon(act.type);
                return (
                  <div key={act.id} className="flex gap-4 items-start group">
@@ -653,14 +494,14 @@ export default function App() {
                      <Icon className={cn("w-5 h-5", color)} />
                    </div>
                    <div className="flex flex-col min-w-0">
-                      <p className="text-[11px] leading-tight flex flex-wrap items-center">
+                      <p className="text-sm leading-tight">
                         <span className="font-black text-white">{act.user || 'System'}</span>
                         <span className="text-zinc-500 mx-1.5">{getActivityVerb(act.type)}</span>
-                        <span className="font-black text-orange-500 hover:underline cursor-pointer truncate">
+                        <span className="font-black text-orange-500 hover:underline cursor-pointer truncate block sm:inline">
                           {getActivityLabel(act)}
                         </span>
                       </p>
-                      <span className="text-[8px] font-black text-zinc-700 uppercase tracking-widest mt-1.5">
+                      <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mt-1.5">
                         {new Date(act.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                    </div>
@@ -675,68 +516,8 @@ export default function App() {
              )}
           </div>
           <button onClick={() => setActiveView('activity')} className="w-full mt-8 pt-6 border-t border-zinc-900 text-center text-[10px] font-black uppercase tracking-widest text-zinc-600 hover:text-white transition-colors">
-            Full Audit Path
+            View Expanded Activity Ledger
           </button>
-        </div>
-      </div>
-
-      {/* Track Stats Table / Secondary Info */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-zinc-950 border border-zinc-900 rounded-[2.5rem] p-8 overflow-hidden">
-           <div className="flex items-center justify-between mb-8">
-              <h3 className="text-lg font-black uppercase tracking-tight">Top Performance</h3>
-              <button onClick={() => setActiveView('tracks')} className="text-[10px] font-black uppercase tracking-widest text-orange-500">View Library</button>
-           </div>
-           <div className="space-y-4">
-              {tracks.slice(0, 4).map(track => (
-                <div key={track.id} className="flex items-center justify-between p-4 rounded-2xl bg-zinc-900/50 border border-zinc-800 group hover:bg-zinc-900 transition-all">
-                  <div className="flex items-center gap-4 min-w-0">
-                     <div className="w-10 h-10 rounded-xl overflow-hidden border border-zinc-800">
-                        <img src={track.image_url!} className="w-full h-full object-cover" />
-                     </div>
-                     <div className="min-w-0">
-                        <p className="text-xs font-black uppercase truncate">{track.name}</p>
-                        <p className="text-[10px] text-zinc-500 font-medium">{track.artist}</p>
-                     </div>
-                  </div>
-                  <div className="flex items-center gap-6">
-                     <div className="flex flex-col items-end">
-                        <span className="text-[10px] font-black">{track.plays}</span>
-                        <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Plays</span>
-                     </div>
-                     <button 
-                       onClick={() => playTrack(track, tracks)}
-                       className="w-8 h-8 rounded-full bg-white text-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
-                     >
-                        <Play className="w-4 h-4 fill-current ml-0.5" />
-                     </button>
-                  </div>
-                </div>
-              ))}
-           </div>
-        </div>
-
-        <div className="bg-zinc-950 border border-zinc-900 rounded-[2.5rem] p-8 overflow-hidden">
-           <div className="flex items-center justify-between mb-8">
-              <h3 className="text-lg font-black uppercase tracking-tight">System Status</h3>
-              <div className="flex items-center gap-2">
-                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                 <span className="text-[10px] font-black uppercase tracking-widest text-emerald-500">Cloud Sync Active</span>
-              </div>
-           </div>
-           <div className="grid grid-cols-2 gap-4">
-              {[
-                { label: 'Database Latency', value: '18ms', status: 'optimal' },
-                { label: 'Storage Usage', value: '42%', status: 'optimal' },
-                { label: 'API Uptime', value: '99.9%', status: 'optimal' },
-                { label: 'Active Sessions', value: stats.activeClients, status: 'optimal' },
-              ].map(item => (
-                <div key={item.label} className="p-6 rounded-3xl bg-zinc-900/50 border border-zinc-800 flex flex-col items-center text-center space-y-2">
-                   <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">{item.label}</span>
-                   <span className="text-xl font-mono font-bold">{item.value}</span>
-                </div>
-              ))}
-           </div>
         </div>
       </div>
     </div>
@@ -800,16 +581,6 @@ export default function App() {
                       {track.status}
                    </div>
                     <div className="flex items-center gap-2">
-                     <button 
-                       onClick={(e) => {
-                         e.stopPropagation();
-                         handleDownload(track);
-                       }}
-                       className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md border border-white/10 flex items-center justify-center text-white hover:bg-white hover:text-black transition-all"
-                       title="Download Track"
-                     >
-                       <Download className="w-5 h-5" />
-                     </button>
                      <button 
                        onClick={(e) => {
                          e.stopPropagation();
@@ -891,43 +662,6 @@ export default function App() {
           <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] mt-1">Bridge the gap between feedback and final masters.</p>
         </div>
         <div className="flex items-center gap-3">
-          {selectedClientIds.length > 0 && (
-            <motion.div 
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="flex items-center gap-2 bg-orange-500/10 border border-orange-500/20 rounded-full px-4 py-1.5 mr-2"
-            >
-              <span className="text-[10px] font-black uppercase tracking-widest text-orange-500 mr-2">
-                {selectedClientIds.length} Selected
-              </span>
-              <div className="h-4 w-px bg-orange-500/20 mx-1" />
-              <button 
-                onClick={() => handleBulkStatusUpdate('online')}
-                className="text-[9px] font-black uppercase tracking-widest text-orange-500 hover:text-white transition-colors"
-              >
-                Set Online
-              </button>
-              <button 
-                onClick={handleBulkTagAdd}
-                className="text-[9px] font-black uppercase tracking-widest text-orange-500 hover:text-white transition-colors"
-                title="Bulk Tag"
-              >
-                Add Tag
-              </button>
-              <button 
-                onClick={handleBulkDelete}
-                className="text-[9px] font-black uppercase tracking-widest text-rose-500 hover:text-rose-400 transition-colors"
-              >
-                Delete
-              </button>
-              <button 
-                onClick={() => setSelectedClientIds([])}
-                className="text-zinc-500 hover:text-white"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </motion.div>
-          )}
           <div className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
             <input 
@@ -955,21 +689,7 @@ export default function App() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {filteredClients.length > 0 ? filteredClients.map(client => (
-          <div 
-            key={client.id} 
-            onClick={() => toggleClientSelection(client.id)}
-            className={cn(
-              "bg-zinc-950 border rounded-3xl p-6 transition-all group relative cursor-pointer",
-              selectedClientIds.includes(client.id) ? "border-orange-500 ring-1 ring-orange-500/50" : "border-zinc-900 hover:border-zinc-800"
-            )}
-          >
-            {selectedClientIds.includes(client.id) && (
-              <div className="absolute top-4 right-4 z-10">
-                <div className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center text-black">
-                  <Zap className="w-3 h-3 fill-current" />
-                </div>
-              </div>
-            )}
+          <div key={client.id} className="bg-zinc-950 border border-zinc-900 rounded-3xl p-6 hover:border-zinc-800 transition-colors group relative">
             <div className="flex items-start justify-between">
               <div className="flex gap-4">
                 <div className="w-16 h-16 rounded-2xl bg-zinc-900 flex items-center justify-center text-3xl font-black text-orange-500 border border-zinc-800 group-hover:bg-orange-500 group-hover:text-black transition-all overflow-hidden">
@@ -994,7 +714,7 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <div className="flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
+              <div className="flex flex-col gap-2">
                 <button 
                   onClick={() => {
                     setSelectedMessageClientId(client.id);
@@ -1026,7 +746,7 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <div className="mt-8 pt-6 border-t border-zinc-900 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
+            <div className="mt-8 pt-6 border-t border-zinc-900 flex items-center justify-between">
                <div className="flex items-center gap-2">
                  <button 
                    onClick={() => setActiveView('sharing')}
@@ -1900,47 +1620,40 @@ export default function App() {
           <div className="lg:col-span-2 space-y-12">
             <div className="space-y-6">
               <h3 className="text-xs font-black uppercase tracking-[0.2em] text-zinc-500">Activity Timeline</h3>
-              <div className="bg-zinc-950 border border-zinc-900 rounded-[3rem] overflow-hidden p-8">
-                <div className="max-h-[400px] overflow-y-auto pr-4 scrollbar-hide relative">
-                    {clientActivities.length > 0 ? (
-                        <div className="space-y-8 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-zinc-800 before:to-transparent">
-                            {clientActivities.map((act, index) => (
-                                <div key={act.id} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
-                                    {/* Icon */}
-                                    <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-zinc-950 bg-zinc-900 text-orange-500 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10 transition-transform group-hover:scale-110">
-                                        {act.type === 'play' && <Play className="w-4 h-4 fill-current" />}
-                                        {act.type === 'like' && <ThumbsUp className="w-4 h-4" />}
-                                        {act.type === 'download' && <Download className="w-4 h-4" />}
-                                        {act.type === 'social' && <MessageSquare className="w-4 h-4" />}
-                                        {!['play', 'like', 'download', 'social'].includes(act.type) && <div className="w-2 h-2 rounded-full bg-orange-500" />}
-                                    </div>
-                                    
-                                    {/* Activity Card */}
-                                    <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] p-4 rounded-2xl border border-zinc-900 bg-zinc-950/50 hover:bg-zinc-900/50 transition-colors shadow-xl group-hover:border-zinc-800">
-                                        <div className="flex flex-col space-y-2">
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-sm font-bold text-white">{act.action}</span>
-                                                <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">{new Date(act.timestamp).toLocaleDateString()}</span>
-                                            </div>
-                                            <span className="text-xs italic font-black uppercase text-zinc-500 truncate">{act.target || 'System Port'}</span>
-                                            {act.details && (
-                                                <p className="text-xs text-zinc-400 mt-2">{act.details}</p>
-                                            )}
-                                        </div>
-                                    </div>
+              <div className="bg-zinc-950 border border-zinc-900 rounded-[3rem] overflow-hidden">
+                <div className="max-h-[400px] overflow-y-auto">
+                    <table className="w-full text-left">
+                    <thead>
+                        <tr className="border-b border-zinc-900">
+                        <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-600">Interaction</th>
+                        <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-600">Associated Asset</th>
+                        <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-600">Timestamp</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-900/50">
+                        {clientActivities.length > 0 ? clientActivities.map(act => (
+                        <tr key={act.id} className="hover:bg-zinc-900/40 transition-colors group">
+                            <td className="px-8 py-6 text-sm font-bold flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-xl bg-zinc-900 flex items-center justify-center text-orange-500">
+                                    {act.type === 'play' && <Play className="w-4 h-4 fill-current" />}
+                                    {act.type === 'like' && <ThumbsUp className="w-4 h-4" />}
+                                    {act.type === 'download' && <Download className="w-4 h-4" />}
+                                    {act.type === 'social' && <MessageSquare className="w-4 h-4" />}
                                 </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="flex flex-col items-center justify-center py-20 text-center">
-                            <div className="w-16 h-16 rounded-3xl bg-zinc-900 flex items-center justify-center text-zinc-700 mb-4">
-                                <AlertCircle className="w-6 h-6" />
-                            </div>
-                            <p className="text-zinc-600 text-[10px] font-black uppercase tracking-widest">
-                                No historical logs found for this entity.
-                            </p>
-                        </div>
-                    )}
+                                <span>{act.action}</span>
+                            </td>
+                            <td className="px-8 py-6 text-sm italic font-black uppercase text-zinc-300 truncate max-w-[200px]">{act.target || 'System Port'}</td>
+                            <td className="px-8 py-6 text-[10px] font-black text-zinc-600 uppercase tracking-widest">{new Date(act.timestamp).toLocaleDateString()}</td>
+                        </tr>
+                        )) : (
+                            <tr>
+                                <td colSpan={3} className="px-8 py-32 text-center text-zinc-600 text-[10px] font-black uppercase tracking-widest">
+                                    No historical logs found for this entity.
+                                </td>
+                            </tr>
+                        )}
+                    </tbody>
+                    </table>
                 </div>
               </div>
             </div>

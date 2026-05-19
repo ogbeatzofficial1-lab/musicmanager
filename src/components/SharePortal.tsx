@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   Play, Pause, Download, ThumbsUp, ThumbsDown, 
-  MessageSquare, Send, Music, Clock, Lock, ChevronRight,
-  Share2, Volume2, Globe, Sparkles
+  MessageSquare, Send, Music, Clock, Lock, ChevronRight
 } from 'lucide-react';
 import { Track, ShareLink, Playlist } from '../types';
 import { cn } from '../lib/utils';
@@ -31,6 +30,9 @@ export default function SharePortal({ track: initialTrack, playlist, shareLink }
     if (!playlist) return [];
     return allTracks.filter(t => playlist.track_ids.includes(t.id));
   }, [playlist, allTracks]);
+
+  // Load existing comments/messages for this track/client? 
+  // Let's just submit for now.
 
   useEffect(() => {
     if (playlistTracks.length > 0 && !activeTrack) {
@@ -84,7 +86,7 @@ export default function SharePortal({ track: initialTrack, playlist, shareLink }
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const pct = Math.max(0, Math.min(1, x / rect.width));
+    const pct = x / rect.width;
     if (audioRef.current) {
       audioRef.current.currentTime = pct * duration;
     }
@@ -97,17 +99,13 @@ export default function SharePortal({ track: initialTrack, playlist, shareLink }
   };
 
   const handleRating = (type: 'up' | 'down') => {
-    if (rating === type) {
-      setRating(null);
-      return;
-    }
     setRating(type);
     addActivity({
       type: type === 'up' ? 'social' as any : 'system' as any,
-      user: 'Industry Client' + (shareLink.recipient_email ? ` (${shareLink.recipient_email})` : ''),
-      action: type === 'up' ? 'thumbs_up' as any : 'thumbs_down' as any,
+      user: 'Client User' + (shareLink.recipient_email ? ` (${shareLink.recipient_email})` : ''),
+      action: type === 'up' ? 'liked' : 'disliked',
       target: activeTrack?.name || playlist?.name || 'Asset',
-      details: type === 'up' ? 'High-priority approval.' : 'Requested revision cycle.',
+      details: type === 'up' ? 'Approved the mix.' : 'Requested revisions.',
       client_id: shareLink.client_id
     });
   };
@@ -116,12 +114,12 @@ export default function SharePortal({ track: initialTrack, playlist, shareLink }
     e.preventDefault();
     if (!comment.trim()) return;
     
-    const newComment = { id: Date.now().toString(), user: 'Industry Client', text: comment, time: 'Just now' };
+    const newComment = { id: Date.now().toString(), user: 'Client', text: comment, time: 'Just now' };
     setComments([newComment, ...comments]);
     
     addActivity({
       type: 'comment' as any,
-      user: 'Industry Client' + (shareLink.recipient_email ? ` (${shareLink.recipient_email})` : ''),
+      user: 'Client User' + (shareLink.recipient_email ? ` (${shareLink.recipient_email})` : ''),
       action: 'commented on',
       target: activeTrack?.name || playlist?.name || 'Asset',
       details: comment,
@@ -129,314 +127,213 @@ export default function SharePortal({ track: initialTrack, playlist, shareLink }
     });
 
     if (shareLink.client_id) {
-       await sendMessage(shareLink.client_id, `[Industry Feedback on ${activeTrack?.name || 'Asset'}]: ${comment}`);
+       await sendMessage(shareLink.client_id, `[Feedback on ${activeTrack?.name || 'Asset'}]: ${comment}`);
     }
 
     setComment('');
   };
 
   return (
-    <div className="min-h-screen bg-black text-white selection:bg-orange-500 selection:text-black overflow-x-hidden font-sans">
-      {/* Dynamic Blurred Background */}
-      <div className="fixed inset-0 pointer-events-none z-0">
-         <AnimatePresence mode="wait">
+    <div className="min-h-screen bg-black text-white p-6 md:p-12 font-sans selection:bg-orange-500 selection:text-black">
+      <div className="max-w-6xl mx-auto flex items-center justify-between mb-12">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl overflow-hidden border border-orange-500/20 flex items-center justify-center bg-zinc-900">
+            <img src="/favicon.svg" className="w-8 h-8 object-contain" alt="OG BEATZ" />
+          </div>
+          <span className="text-2xl font-black tracking-tighter uppercase italic">OG BEATZ</span>
+        </div>
+        <div className="hidden md:flex flex-col items-end">
+           <span className="text-[10px] font-black uppercase tracking-[0.2em] text-orange-500">Master Reference Portal</span>
+           <span className="text-[10px] text-zinc-600 font-medium">Session ID: {Math.random().toString(36).substring(7).toUpperCase()}</span>
+        </div>
+      </div>
+
+      <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+        
+        {/* Left Side: Visuals & Player */}
+        <div className="space-y-12">
+          <div className="relative aspect-square max-w-[400px] mx-auto group">
             <motion.div 
-               key={activeTrack?.image_url}
-               initial={{ opacity: 0 }}
-               animate={{ opacity: 0.3 }}
-               exit={{ opacity: 0 }}
-               transition={{ duration: 1 }}
-               className="absolute inset-0 grayscale blur-[120px] scale-150"
-               style={{ 
-                 backgroundImage: `url(${activeTrack?.image_url})`,
-                 backgroundSize: 'cover',
-                 backgroundPosition: 'center'
-               }}
-            />
-         </AnimatePresence>
-         <div className="absolute inset-0 bg-black/60" />
-      </div>
-
-      <div className="relative z-10 p-6 md:p-12 lg:p-20">
-        <header className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-8 mb-20">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-3xl overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center backdrop-blur-3xl">
-              <Sparkles className="w-8 h-8 text-orange-500" />
-            </div>
-            <div>
-              <div className="text-[10px] font-black tracking-[0.4em] text-orange-500 uppercase leading-none mb-1">Authenticated Delivery</div>
-              <h1 className="text-3xl font-black tracking-tighter uppercase italic flex items-center gap-2">
-                OG BEATZ <span className="text-zinc-600 font-medium">HUB</span>
-              </h1>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-12">
-            <div className="hidden md:flex flex-col items-end">
-               <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
-                  <Globe className="w-3 h-3" /> Encrypted Endpoint
-               </div>
-               <span className="text-[10px] text-zinc-700 font-mono mt-1">SESSION_TOKEN: {shareLink.token.slice(0, 12)}</span>
-            </div>
-            {shareLink.expires_at && (
-              <div className="px-5 py-2 rounded-2xl bg-zinc-900/50 border border-zinc-800 backdrop-blur-xl flex items-center gap-3">
-                <Clock className="w-4 h-4 text-orange-500" />
-                <div className="flex flex-col">
-                  <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500">Portal Access Expiry</span>
-                  <span className="text-[10px] font-bold">{new Date(shareLink.expires_at).toLocaleDateString()}</span>
+               animate={isPlaying ? { scale: 1.05 } : { scale: 1 }}
+               className="w-full h-full rounded-[4rem] overflow-hidden shadow-[0_0_100px_rgba(249,115,22,0.15)] border-2 border-zinc-800"
+            >
+              {activeTrack?.image_url ? (
+                <img src={activeTrack.image_url} className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
+                   <Music className="w-12 h-12 text-zinc-800" />
                 </div>
+              )}
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <button 
+                  onClick={togglePlay}
+                  className="w-24 h-24 bg-white text-black rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-transform"
+                >
+                  {isPlaying ? <Pause className="w-10 h-10 fill-current" /> : <Play className="w-10 h-10 fill-current ml-2" />}
+                </button>
               </div>
-            )}
-          </div>
-        </header>
-
-        <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-16">
-          
-          {/* Left: Player & Visuals (8 Cols) */}
-          <div className="lg:col-span-12 xl:col-span-7 space-y-12">
-            <div className="flex flex-col md:flex-row gap-12 items-center md:items-start group">
-               <motion.div 
-                 initial={{ scale: 0.9, opacity: 0 }}
-                 animate={{ scale: 1, opacity: 1 }}
-                 className="relative w-full max-w-[400px] aspect-square rounded-[4rem] overflow-hidden shadow-[0_0_120px_rgba(249,115,22,0.15)] border-2 border-white/5 bg-zinc-900 group"
-               >
-                  {activeTrack?.image_url ? (
-                    <img src={activeTrack.image_url} className="w-full h-full object-cover transition-transform duration-[20s] group-hover:scale-110" />
-                  ) : (
-                    <Music className="absolute inset-0 m-auto w-16 h-16 text-zinc-800" />
-                  )}
-                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-500 backdrop-blur-sm">
-                    <button 
-                      onClick={togglePlay}
-                      className="w-28 h-28 bg-white text-black rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-transform shadow-2xl"
-                    >
-                      {isPlaying ? <Pause className="w-12 h-12 fill-current" /> : <Play className="w-12 h-12 fill-current ml-2" />}
-                    </button>
-                  </div>
-               </motion.div>
-
-               <div className="flex-1 space-y-8 text-center md:text-left py-4">
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-center md:justify-start gap-4">
-                       <div className="px-3 py-1 bg-orange-500 text-black text-[9px] font-black uppercase tracking-[0.2em] rounded-md">MASTER</div>
-                       <div className="text-zinc-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
-                          <Volume2 className="w-3.5 h-3.5" /> Reference Mix V2.4
-                       </div>
-                    </div>
-                    <h2 className="text-5xl md:text-8xl font-black tracking-tighter leading-none italic uppercase">{activeTrack?.name || 'Untitled'}</h2>
-                    <p className="text-2xl text-zinc-400 font-medium tracking-tight">{activeTrack?.artist || 'Unknown Artist'}</p>
-                  </div>
-
-                  {/* Metadata Indicators */}
-                  <div className="flex flex-wrap items-center justify-center md:justify-start gap-6">
-                     <div className="flex flex-col">
-                        <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest leading-none mb-2">Tempo</span>
-                        <span className="text-xl font-mono font-bold">{activeTrack?.bpm || '--'} BPM</span>
-                     </div>
-                     <div className="w-px h-8 bg-white/5" />
-                     <div className="flex flex-col">
-                        <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest leading-none mb-2">Tonal Key</span>
-                        <span className="text-xl font-mono font-bold uppercase">{activeTrack?.key_signature || '--'}</span>
-                     </div>
-                     <div className="w-px h-8 bg-white/5" />
-                     <div className="flex flex-col">
-                        <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest leading-none mb-2">Duration</span>
-                        <span className="text-xl font-mono font-bold">{formatTime(duration || activeTrack?.duration || 0)}</span>
-                     </div>
-                  </div>
-               </div>
-            </div>
-
-            {/* Custom Pro Waveform / Progress Bar */}
-            <div className="space-y-6">
-               <div 
-                 onClick={handleSeek}
-                 className="h-20 w-full group relative cursor-pointer flex items-center"
-               >
-                  <div className="absolute inset-0 bg-white/5 rounded-3xl backdrop-blur-sm border border-white/5" />
-                  <div className="absolute inset-x-8 inset-y-6 flex items-center justify-between gap-1 overflow-hidden pointer-events-none">
-                     {[...Array(60)].map((_, i) => {
-                        const progressPct = (progress / duration) * 100;
-                        const barPct = (i / 60) * 100;
-                        const active = barPct <= progressPct;
-                        return (
-                          <motion.div 
-                            key={i}
-                            animate={{ 
-                              height: active && isPlaying ? [20, 40, 20] : 10,
-                              backgroundColor: active ? '#f97316' : 'rgba(255,255,255,0.1)'
-                            }}
-                            transition={{ 
-                              duration: 0.5, 
-                              repeat: active && isPlaying ? Infinity : 0, 
-                              delay: i * 0.02 
-                            }}
-                            className="flex-1 rounded-full"
-                          />
-                        );
-                     })}
-                  </div>
-                  {/* Invisible Seek Overlay */}
-                  <div className="absolute inset-0 z-10" />
-               </div>
-               
-               <div className="flex justify-between text-[10px] font-mono text-zinc-600 uppercase tracking-widest px-4">
-                  <div className="flex items-center gap-2">
-                     <div className="w-2 h-2 rounded-full bg-orange-500" />
-                     <span>{formatTime(progress)}</span>
-                  </div>
-                  <span>{formatTime(duration)}</span>
-               </div>
+            </motion.div>
+            
+            {/* Play Button for Mobile */}
+            <div className="md:hidden absolute -bottom-6 left-1/2 -translate-x-1/2">
+                <button 
+                  onClick={togglePlay}
+                  className="w-20 h-20 bg-orange-500 text-black rounded-full flex items-center justify-center shadow-2xl shadow-orange-500/20"
+                >
+                  {isPlaying ? <Pause className="w-8 h-8 fill-current" /> : <Play className="w-8 h-8 fill-current ml-1" />}
+                </button>
             </div>
           </div>
 
-          {/* Right: Interaction Panel (4 Cols) */}
-          <div className="lg:col-span-12 xl:col-span-5 space-y-12">
-            <div className="bg-zinc-950/40 border border-white/5 backdrop-blur-3xl p-10 md:p-12 rounded-[4rem] shadow-2xl space-y-12">
-               
-               <div className="space-y-8">
-                  <div className="flex items-center justify-between">
-                     <h3 className="text-xl font-black uppercase tracking-tight">Review Protocol</h3>
-                     {shareLink.download_enabled && (
-                        <button 
-                          onClick={() => {
-                             if (activeTrack?.file_url) {
-                                const a = document.createElement('a');
-                                a.href = activeTrack.file_url;
-                                a.download = `${activeTrack.name}_MASTER.mp3`;
-                                a.click();
-                             }
-                          }}
-                          className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-orange-500 hover:text-white transition-colors"
-                        >
-                           <Download className="w-4 h-4" /> Download WAV
-                        </button>
-                     )}
-                  </div>
+          <div className="text-center md:text-left space-y-4">
+             <div className="flex items-center justify-center md:justify-start gap-3 text-orange-500 text-[10px] font-black uppercase tracking-widest">
+                <Music className="w-4 h-4" /> MASTER REFERENCE • 48KHZ / 24-BIT
+             </div>
+             <h1 className="text-5xl md:text-7xl font-black tracking-tighter leading-none">{activeTrack?.name || 'Untitled'}</h1>
+             <p className="text-zinc-500 text-xl font-medium">{activeTrack?.artist || 'Unknown'}</p>
+          </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+          {/* New: Progress Bar for Share Portal */}
+          <div className="space-y-4">
+             <div 
+               onClick={handleSeek}
+               className="h-2 w-full bg-zinc-900 rounded-full cursor-pointer overflow-hidden relative group"
+             >
+                <motion.div 
+                  className="absolute inset-y-0 left-0 bg-orange-500"
+                  animate={{ width: `${(progress / duration) * 100}%` }}
+                />
+             </div>
+             <div className="flex justify-between text-[10px] font-mono text-zinc-600 uppercase tracking-widest">
+                <span>{formatTime(progress)}</span>
+                <span>{formatTime(duration)}</span>
+             </div>
+          </div>
+        </div>
+
+        {/* Right Side: Interaction */}
+        <div className="space-y-12 bg-zinc-950/50 p-8 md:p-12 rounded-[3.5rem] border border-zinc-900">
+           <div className="space-y-8">
+              <div className="flex items-center justify-between">
+                 <h2 className="text-2xl font-black tracking-tight">Reference Action</h2>
+                 {shareLink.download_enabled ? (
+                   <button 
+                     onClick={() => {
+                       if (activeTrack?.file_url) {
+                         const a = document.createElement('a');
+                         a.href = activeTrack.file_url;
+                         a.download = activeTrack.name;
+                         a.click();
+                       }
+                     }}
+                     className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-zinc-400 hover:text-white transition-colors"
+                   >
+                     <Download className="w-4 h-4" /> Download Master
+                   </button>
+                 ) : (
+                   <div className="flex items-center gap-2 text-xs text-zinc-600 font-bold uppercase tracking-widest">
+                     <Lock className="w-4 h-4" /> Downloads Disabled
+                   </div>
+                 )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                 <button 
+                   onClick={() => handleRating('up')}
+                   className={cn(
+                     "flex flex-col items-center justify-center gap-4 p-8 rounded-3xl border transition-all duration-300",
+                     rating === 'up' ? "bg-emerald-500 border-emerald-400 text-black font-black" : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-emerald-500"
+                   )}
+                 >
+                    <ThumbsUp className={cn("w-8 h-8", rating === 'up' && "fill-current")} />
+                    <span className="text-[10px] uppercase tracking-widest">Approve Mix</span>
+                 </button>
+                 <button 
+                    onClick={() => handleRating('down')}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-4 p-8 rounded-3xl border transition-all duration-300",
+                      rating === 'down' ? "bg-red-500 border-red-400 text-black font-black" : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-red-500"
+                    )}
+                 >
+                    <ThumbsDown className={cn("w-8 h-8", rating === 'down' && "fill-current")} />
+                    <span className="text-[10px] uppercase tracking-widest">Needs Revisions</span>
+                 </button>
+              </div>
+           </div>
+
+           <div className="space-y-6">
+              <div className="flex items-center gap-2 text-zinc-300 text-sm font-bold">
+                 {playlist ? <Music className="w-4 h-4" /> : <MessageSquare className="w-4 h-4" />}
+                 {playlist ? 'Collection Assets' : 'Leave Detailed Feedback'}
+              </div>
+
+              {playlist && (
+                <div className="space-y-2 mb-8">
+                   {playlistTracks.map((t, idx) => (
                      <button 
-                       onClick={() => handleRating('up')}
+                       key={t.id}
+                       onClick={() => setActiveTrack(t)}
                        className={cn(
-                         "flex flex-col items-center justify-center gap-5 p-10 rounded-[2.5rem] border transition-all duration-500",
-                         rating === 'up' 
-                         ? "bg-emerald-500 border-emerald-400 text-black shadow-[0_0_50px_rgba(16,185,129,0.2)]" 
-                         : "bg-white/5 border-white/5 text-emerald-500/50 hover:border-emerald-500/30 hover:bg-emerald-500/5"
+                         "w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left",
+                         activeTrack?.id === t.id ? "bg-orange-500 border-orange-400 text-black font-black" : "bg-black border-zinc-900 text-zinc-500 hover:border-zinc-700"
                        )}
                      >
-                        <ThumbsUp className={cn("w-10 h-10", rating === 'up' && "fill-current")} />
-                        <span className="text-[9px] font-black uppercase tracking-widest">Approve Mix</span>
-                     </button>
-                     <button 
-                       onClick={() => handleRating('down')}
-                       className={cn(
-                         "flex flex-col items-center justify-center gap-5 p-10 rounded-[2.5rem] border transition-all duration-500",
-                         rating === 'down' 
-                         ? "bg-red-500 border-red-400 text-black shadow-[0_0_50px_rgba(239,68,68,0.2)]" 
-                         : "bg-white/5 border-white/5 text-red-500/50 hover:border-red-500/30 hover:bg-red-500/5"
-                       )}
-                     >
-                        <ThumbsDown className={cn("w-10 h-10", rating === 'down' && "fill-current")} />
-                        <span className="text-[9px] font-black uppercase tracking-widest">Revisions</span>
-                     </button>
-                  </div>
-               </div>
-
-               <div className="space-y-6">
-                  <div className="flex items-center gap-3 text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em]">
-                     <MessageSquare className="w-4 h-4 text-orange-500" /> Professional Feedback
-                  </div>
-
-                  {playlist && (
-                    <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                       {playlistTracks.map((t, idx) => (
-                         <button 
-                           key={t.id}
-                           onClick={() => setActiveTrack(t)}
-                           className={cn(
-                             "w-full flex items-center justify-between p-5 rounded-[1.5rem] border transition-all group",
-                             activeTrack?.id === t.id 
-                             ? "bg-white border-white text-black font-black" 
-                             : "bg-white/5 border-white/5 text-zinc-500 hover:border-white/10 hover:bg-white/10"
-                           )}
-                         >
-                           <div className="flex items-center gap-4 overflow-hidden">
-                              <span className={cn("text-[10px] font-mono", activeTrack?.id === t.id ? "text-zinc-600" : "text-zinc-800")}>{(idx + 1).toString().padStart(2, '0')}</span>
-                              <span className="text-[11px] uppercase tracking-tight truncate">{t.name}</span>
-                           </div>
-                           {activeTrack?.id === t.id ? <Play className="w-3.5 h-3.5 fill-current" /> : <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />}
-                         </button>
-                       ))}
-                    </div>
-                  )}
-
-                  {!playlist && (
-                    <form onSubmit={handleComment} className="space-y-4">
-                       <div className="relative">
-                         <textarea 
-                            value={comment}
-                            onChange={(e) => setComment(e.target.value)}
-                            placeholder="Identify specific timestamps for mix adjustments..."
-                            className="w-full h-40 bg-white/5 border border-white/5 rounded-[2rem] p-8 text-xs focus:outline-none focus:border-orange-500 transition-all resize-none placeholder:text-zinc-700 leading-relaxed"
-                         />
-                         <button 
-                           type="submit"
-                           disabled={!comment.trim()}
-                           className="absolute bottom-5 right-5 w-12 h-12 bg-white text-black rounded-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all shadow-xl disabled:opacity-50 disabled:scale-100"
-                         >
-                            <Send className="w-5 h-5" />
-                         </button>
+                       <div className="flex items-center gap-3">
+                          <div className={cn("w-6 h-6 rounded-lg bg-zinc-900 border border-black/20 flex items-center justify-center text-[10px]", activeTrack?.id === t.id ? "bg-white/20" : "")}>{idx + 1}</div>
+                          <span className="text-xs uppercase tracking-tight truncate font-bold">{t.name}</span>
                        </div>
-                    </form>
-                  )}
+                       {activeTrack?.id === t.id && <ChevronRight className="w-4 h-4" />}
+                     </button>
+                   ))}
+                </div>
+              )}
 
-                  <div className="space-y-4 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-                    <AnimatePresence initial={false}>
-                      {comments.map(c => (
-                        <motion.div 
-                          key={c.id}
-                          initial={{ opacity: 0, x: 20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          className="bg-zinc-900 border border-white/5 p-6 rounded-[2rem] space-y-3"
-                        >
-                          <div className="flex items-center justify-between">
-                             <span className="text-[9px] font-black uppercase text-orange-500 tracking-widest">{c.user}</span>
-                             <span className="text-[8px] text-zinc-700 uppercase font-mono">{c.time}</span>
-                          </div>
-                          <p className="text-xs text-zinc-300 leading-relaxed italic">"{c.text}"</p>
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
+              {!playlist && (
+                <form onSubmit={handleComment} className="relative group">
+                   <textarea 
+                      value={comment}
+                      onChange={(e) => setComment(e.target.value)}
+                      placeholder="E.g., Turn down the bass on the chorus..."
+                      className="w-full h-32 bg-black border border-zinc-800 rounded-3xl p-6 text-sm focus:outline-none focus:border-orange-500 transition-all resize-none placeholder:text-zinc-700"
+                   />
+                   <button 
+                     type="submit"
+                     className="absolute bottom-4 right-4 p-3 bg-zinc-900 text-zinc-400 rounded-2xl hover:bg-white hover:text-black transition-all"
+                   >
+                      <Send className="w-4 h-4" />
+                   </button>
+                </form>
+              )}
+
+              <div className="space-y-4 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                {comments.map(c => (
+                  <div key={c.id} className="bg-zinc-900/40 p-4 rounded-3xl border border-zinc-900">
+                    <div className="flex items-center justify-between mb-2">
+                       <span className="text-[10px] font-black uppercase text-orange-500 tracking-tighter">{c.user}</span>
+                       <span className="text-[10px] text-zinc-600 uppercase font-mono">{c.time}</span>
+                    </div>
+                    <p className="text-xs text-zinc-400 leading-relaxed italic">"{c.text}"</p>
                   </div>
-               </div>
-            </div>
-          </div>
-        </main>
-
-        <footer className="mt-32 pb-20 max-w-7xl mx-auto border-t border-white/5 pt-16 flex flex-col md:flex-row items-center justify-between gap-12">
-            <div className="flex flex-col items-center md:items-start gap-4">
-               <div className="flex items-center gap-3">
-                 <div className="w-10 h-10 rounded-2xl overflow-hidden bg-orange-500 flex items-center justify-center">
-                    <Sparkles className="w-6 h-6 text-black" />
-                 </div>
-                 <span className="text-2xl font-black tracking-tighter uppercase italic">OG BEATZ</span>
-               </div>
-               <p className="text-[9px] font-black uppercase tracking-[0.4em] text-zinc-700 pl-1">Unified Artist Distribution Engine</p>
-            </div>
-
-            <div className="flex items-center gap-12 opacity-40 grayscale hover:grayscale-0 hover:opacity-100 transition-all">
-                <div className="flex flex-col items-end">
-                   <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Secured by</span>
-                   <span className="text-[10px] font-black text-white italic">CRYPTO_GATE</span>
-                </div>
-                <div className="flex gap-1">
-                   <div className="w-1 h-8 bg-zinc-800" />
-                   <div className="w-1 h-12 bg-zinc-700" />
-                   <div className="w-1 h-6 bg-zinc-800" />
-                </div>
-            </div>
-        </footer>
+                ))}
+              </div>
+           </div>
+        </div>
       </div>
+
+      <footer className="mt-24 pb-12 text-center border-t border-zinc-900 pt-12 flex flex-col items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center bg-zinc-900">
+               <img src="/favicon.svg" className="w-5 h-5 object-contain" />
+            </div>
+            <span className="text-lg font-black tracking-tighter">OG BEATZ</span>
+          </div>
+          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-700">Secured with Cryptographic Tokens • MEDIA MANAGER PRO</p>
+          <div className="flex items-center gap-2 opacity-20 filter grayscale">
+             <div className="w-4 h-4 rounded-full bg-blue-500" />
+             <div className="w-4 h-4 rounded-full bg-purple-500" />
+             <div className="w-4 h-4 rounded-full bg-orange-500" />
+          </div>
+      </footer>
     </div>
   );
 }

@@ -43,7 +43,7 @@ export default function ShareModal({ track, playlist, onClose }: ShareModalProps
     // Automated URL Assembly matching live production path
     const itemName = encodeURIComponent(track?.name || playlist?.name || 'Shared Music');
     const itemImage = encodeURIComponent(track?.image_url || playlist?.image_url || '');
-    const url = `${window.location.origin}/?share=${link.token}&name=${itemName}&coverImage=${itemImage}`;
+    const url = `${window.location.origin}/share.php?share=${link.token}&name=${itemName}&coverImage=${itemImage}`;
     setShareLink(url);
     setStep('result');
   };

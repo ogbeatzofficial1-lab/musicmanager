@@ -33,38 +33,6 @@ export default function VideoPreviewModal({ video, onClose }: VideoPreviewModalP
     }
   }, [video.video_url, video._brokenBlob]);
 
-  const [isDownloading, setIsDownloading] = React.useState(false);
-
-  const handleDownload = async () => {
-    if (!video.video_url) return;
-    setIsDownloading(true);
-
-    try {
-      const response = await fetch(video.video_url);
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${sourceName.replace(/\s+/g, '_')}_Promo_Master.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      
-      setTimeout(() => {
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        setIsDownloading(false);
-      }, 100);
-    } catch (error) {
-      console.error('Download failed:', error);
-      setIsDownloading(false);
-      const a = document.createElement('a');
-      a.href = video.video_url;
-      a.download = `${sourceName.replace(/\s+/g, '_')}_Promo_Master.mp4`;
-      a.click();
-    }
-  };
-
   const handleDelete = () => {
     if (confirm('Permanently delete this promo asset?')) {
       deletePromoVideo(video.id);
@@ -86,10 +54,10 @@ export default function VideoPreviewModal({ video, onClose }: VideoPreviewModalP
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
-        className="relative w-full max-w-3xl max-h-[85vh] bg-zinc-950 border border-zinc-900 rounded-[3rem] overflow-hidden shadow-2xl flex flex-col md:flex-row"
+        className="relative w-full max-w-5xl bg-zinc-950 border border-zinc-900 rounded-[3.5rem] overflow-hidden shadow-2xl flex flex-col md:flex-row"
       >
         {/* Video Player Side */}
-        <div className="flex-1 bg-black min-h-[300px] aspect-video md:aspect-auto flex items-center justify-center relative group">
+        <div className="flex-1 bg-black min-h-[400px] aspect-video md:aspect-auto flex items-center justify-center relative group">
            {video._brokenBlob ? (
              <div className="flex flex-col items-center gap-4 text-center p-8">
                <div className="w-16 h-16 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
@@ -170,20 +138,8 @@ export default function VideoPreviewModal({ video, onClose }: VideoPreviewModalP
           </div>
 
           <div className="space-y-3 pt-8">
-            <button 
-              onClick={handleDownload}
-              disabled={isDownloading}
-              className="w-full py-4 bg-white text-black rounded-2xl font-black tracking-widest uppercase text-[10px] flex items-center justify-center gap-2 hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
-            >
-              {isDownloading ? (
-                <>
-                  <Download className="w-4 h-4 animate-bounce" /> Processing...
-                </>
-              ) : (
-                <>
-                  <Download className="w-4 h-4" /> Download Master
-                </>
-              )}
+            <button className="w-full py-4 bg-white text-black rounded-2xl font-black tracking-widest uppercase text-[10px] flex items-center justify-center gap-2 hover:scale-105 active:scale-95 transition-all">
+              <Download className="w-4 h-4" /> Download Master
             </button>
             <button className="w-full py-4 bg-zinc-900 border border-zinc-800 text-white rounded-2xl font-black tracking-widest uppercase text-[10px] flex items-center justify-center gap-2 hover:bg-zinc-800 transition-all">
               <Share2 className="w-4 h-4" /> Direct Share

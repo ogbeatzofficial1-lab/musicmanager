@@ -100,16 +100,6 @@ CREATE TABLE IF NOT EXISTS promo_videos (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Promo Packs Table
-CREATE TABLE IF NOT EXISTS promo_packs (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  track_id UUID REFERENCES tracks(id) ON DELETE CASCADE,
-  youtube_copy TEXT,
-  instagram_copy TEXT,
-  generic_copy TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
 -- Profiles Table
 CREATE TABLE IF NOT EXISTS profiles (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -129,7 +119,6 @@ ALTER TABLE share_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE promo_videos ENABLE ROW LEVEL SECURITY;
-ALTER TABLE promo_packs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
 -- Public Policies (Using DO block to avoid 'already exists' errors)
@@ -155,9 +144,6 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access' AND tablename = 'promo_videos') THEN
         CREATE POLICY "Public Access" ON promo_videos FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access' AND tablename = 'promo_packs') THEN
-        CREATE POLICY "Public Access" ON promo_packs FOR ALL USING (true) WITH CHECK (true);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public Access' AND tablename = 'profiles') THEN
         CREATE POLICY "Public Access" ON profiles FOR ALL USING (true) WITH CHECK (true);
