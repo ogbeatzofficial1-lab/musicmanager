@@ -29,7 +29,8 @@ import {
   X,
   Trash2,
   Edit3,
-  Video
+  Video,
+  AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useMediaStore } from './context/MediaStoreContext';
@@ -58,6 +59,7 @@ export default function App() {
   const [selectedMessageClientId, setSelectedMessageClientId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [clientSearchQuery, setClientSearchQuery] = useState('');
+  const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]);
   const [selectedTrackForPromo, setSelectedTrackForPromo] = useState<Track | null>(null);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [editingPlaylist, setEditingPlaylist] = useState<Playlist | null>(null);
@@ -105,6 +107,39 @@ export default function App() {
 
   const handleImportClients = () => {
     fileInputRef.current?.click();
+  };
+
+  const toggleClientSelection = (id: string) => {
+    setSelectedClientIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkStatusUpdate = async (status: 'online' | 'offline' | 'away') => {
+    for (const id of selectedClientIds) {
+      await updateClient(id, { status });
+    }
+    setSelectedClientIds([]);
+  };
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Are you sure you want to delete ${selectedClientIds.length} partners?`)) return;
+    for (const id of selectedClientIds) {
+      await deleteClient(id);
+    }
+    setSelectedClientIds([]);
+  };
+
+  const handleBulkTagAdd = async () => {
+    const tag = prompt("Enter tag to assign to selected partners:");
+    if (!tag) return;
+    for (const id of selectedClientIds) {
+      const client = clients.find(c => c.id === id);
+      if (client && !client.tags.includes(tag)) {
+        await updateClient(id, { tags: [...client.tags, tag] });
+      }
+    }
+    setSelectedClientIds([]);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -584,6 +619,16 @@ export default function App() {
                      <button 
                        onClick={(e) => {
                          e.stopPropagation();
+                         handleDownload(track);
+                       }}
+                       className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md border border-white/10 flex items-center justify-center text-white hover:bg-white hover:text-black transition-all"
+                       title="Download Track"
+                     >
+                       <Download className="w-5 h-5" />
+                     </button>
+                     <button 
+                       onClick={(e) => {
+                         e.stopPropagation();
                          setEditingTrack(track);
                        }}
                        className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md border border-white/10 flex items-center justify-center text-white hover:bg-white hover:text-black transition-all"
@@ -662,6 +707,43 @@ export default function App() {
           <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] mt-1">Bridge the gap between feedback and final masters.</p>
         </div>
         <div className="flex items-center gap-3">
+          {selectedClientIds.length > 0 && (
+            <motion.div 
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="flex items-center gap-2 bg-orange-500/10 border border-orange-500/20 rounded-full px-4 py-1.5 mr-2"
+            >
+              <span className="text-[10px] font-black uppercase tracking-widest text-orange-500 mr-2">
+                {selectedClientIds.length} Selected
+              </span>
+              <div className="h-4 w-px bg-orange-500/20 mx-1" />
+              <button 
+                onClick={() => handleBulkStatusUpdate('online')}
+                className="text-[9px] font-black uppercase tracking-widest text-orange-500 hover:text-white transition-colors"
+              >
+                Set Online
+              </button>
+              <button 
+                onClick={handleBulkTagAdd}
+                className="text-[9px] font-black uppercase tracking-widest text-orange-500 hover:text-white transition-colors"
+                title="Bulk Tag"
+              >
+                Add Tag
+              </button>
+              <button 
+                onClick={handleBulkDelete}
+                className="text-[9px] font-black uppercase tracking-widest text-rose-500 hover:text-rose-400 transition-colors"
+              >
+                Delete
+              </button>
+              <button 
+                onClick={() => setSelectedClientIds([])}
+                className="text-zinc-500 hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </motion.div>
+          )}
           <div className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
             <input 
@@ -689,7 +771,21 @@ export default function App() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {filteredClients.length > 0 ? filteredClients.map(client => (
-          <div key={client.id} className="bg-zinc-950 border border-zinc-900 rounded-3xl p-6 hover:border-zinc-800 transition-colors group relative">
+          <div 
+            key={client.id} 
+            onClick={() => toggleClientSelection(client.id)}
+            className={cn(
+              "bg-zinc-950 border rounded-3xl p-6 transition-all group relative cursor-pointer",
+              selectedClientIds.includes(client.id) ? "border-orange-500 ring-1 ring-orange-500/50" : "border-zinc-900 hover:border-zinc-800"
+            )}
+          >
+            {selectedClientIds.includes(client.id) && (
+              <div className="absolute top-4 right-4 z-10">
+                <div className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center text-black">
+                  <Zap className="w-3 h-3 fill-current" />
+                </div>
+              </div>
+            )}
             <div className="flex items-start justify-between">
               <div className="flex gap-4">
                 <div className="w-16 h-16 rounded-2xl bg-zinc-900 flex items-center justify-center text-3xl font-black text-orange-500 border border-zinc-800 group-hover:bg-orange-500 group-hover:text-black transition-all overflow-hidden">
@@ -714,7 +810,7 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
                 <button 
                   onClick={() => {
                     setSelectedMessageClientId(client.id);
@@ -746,7 +842,7 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <div className="mt-8 pt-6 border-t border-zinc-900 flex items-center justify-between">
+            <div className="mt-8 pt-6 border-t border-zinc-900 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
                <div className="flex items-center gap-2">
                  <button 
                    onClick={() => setActiveView('sharing')}
@@ -1620,40 +1716,47 @@ export default function App() {
           <div className="lg:col-span-2 space-y-12">
             <div className="space-y-6">
               <h3 className="text-xs font-black uppercase tracking-[0.2em] text-zinc-500">Activity Timeline</h3>
-              <div className="bg-zinc-950 border border-zinc-900 rounded-[3rem] overflow-hidden">
-                <div className="max-h-[400px] overflow-y-auto">
-                    <table className="w-full text-left">
-                    <thead>
-                        <tr className="border-b border-zinc-900">
-                        <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-600">Interaction</th>
-                        <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-600">Associated Asset</th>
-                        <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-600">Timestamp</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-900/50">
-                        {clientActivities.length > 0 ? clientActivities.map(act => (
-                        <tr key={act.id} className="hover:bg-zinc-900/40 transition-colors group">
-                            <td className="px-8 py-6 text-sm font-bold flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-xl bg-zinc-900 flex items-center justify-center text-orange-500">
-                                    {act.type === 'play' && <Play className="w-4 h-4 fill-current" />}
-                                    {act.type === 'like' && <ThumbsUp className="w-4 h-4" />}
-                                    {act.type === 'download' && <Download className="w-4 h-4" />}
-                                    {act.type === 'social' && <MessageSquare className="w-4 h-4" />}
+              <div className="bg-zinc-950 border border-zinc-900 rounded-[3rem] overflow-hidden p-8">
+                <div className="max-h-[400px] overflow-y-auto pr-4 scrollbar-hide relative">
+                    {clientActivities.length > 0 ? (
+                        <div className="space-y-8 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-zinc-800 before:to-transparent">
+                            {clientActivities.map((act, index) => (
+                                <div key={act.id} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+                                    {/* Icon */}
+                                    <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-zinc-950 bg-zinc-900 text-orange-500 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10 transition-transform group-hover:scale-110">
+                                        {act.type === 'play' && <Play className="w-4 h-4 fill-current" />}
+                                        {act.type === 'like' && <ThumbsUp className="w-4 h-4" />}
+                                        {act.type === 'download' && <Download className="w-4 h-4" />}
+                                        {act.type === 'social' && <MessageSquare className="w-4 h-4" />}
+                                        {!['play', 'like', 'download', 'social'].includes(act.type) && <div className="w-2 h-2 rounded-full bg-orange-500" />}
+                                    </div>
+                                    
+                                    {/* Activity Card */}
+                                    <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] p-4 rounded-2xl border border-zinc-900 bg-zinc-950/50 hover:bg-zinc-900/50 transition-colors shadow-xl group-hover:border-zinc-800">
+                                        <div className="flex flex-col space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-sm font-bold text-white">{act.action}</span>
+                                                <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">{new Date(act.timestamp).toLocaleDateString()}</span>
+                                            </div>
+                                            <span className="text-xs italic font-black uppercase text-zinc-500 truncate">{act.target || 'System Port'}</span>
+                                            {act.details && (
+                                                <p className="text-xs text-zinc-400 mt-2">{act.details}</p>
+                                            )}
+                                        </div>
+                                    </div>
                                 </div>
-                                <span>{act.action}</span>
-                            </td>
-                            <td className="px-8 py-6 text-sm italic font-black uppercase text-zinc-300 truncate max-w-[200px]">{act.target || 'System Port'}</td>
-                            <td className="px-8 py-6 text-[10px] font-black text-zinc-600 uppercase tracking-widest">{new Date(act.timestamp).toLocaleDateString()}</td>
-                        </tr>
-                        )) : (
-                            <tr>
-                                <td colSpan={3} className="px-8 py-32 text-center text-zinc-600 text-[10px] font-black uppercase tracking-widest">
-                                    No historical logs found for this entity.
-                                </td>
-                            </tr>
-                        )}
-                    </tbody>
-                    </table>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-20 text-center">
+                            <div className="w-16 h-16 rounded-3xl bg-zinc-900 flex items-center justify-center text-zinc-700 mb-4">
+                                <AlertCircle className="w-6 h-6" />
+                            </div>
+                            <p className="text-zinc-600 text-[10px] font-black uppercase tracking-widest">
+                                No historical logs found for this entity.
+                            </p>
+                        </div>
+                    )}
                 </div>
               </div>
             </div>

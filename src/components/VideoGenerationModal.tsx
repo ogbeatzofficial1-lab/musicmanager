@@ -205,34 +205,17 @@ export default function VideoGenerationModal({ track, playlist, onClose }: Video
                 animate={{ opacity: 1, y: 0 }}
                 className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-12 items-center"
               >
-                  <div className="aspect-[9/16] bg-black rounded-[3rem] border border-zinc-900 overflow-hidden relative shadow-2xl group">
-                    {(generatedVideo?.video_url?.match(/\.(mp4|webm|mov)$/i) || generatedVideo?.video_url?.startsWith('data:video') || generatedVideo?.video_url?.startsWith('blob:')) ? (
-                       <video 
-                         src={generatedVideo?.video_url} 
-                         className="w-full h-full object-cover opacity-60"
-                         autoPlay
-                         loop
-                         muted
-                         playsInline
-                         controls={false}
-                         onCanPlay={(e) => e.currentTarget.play()}
-                       />
-                    ) : (
-                       <div className="w-full h-full relative overflow-hidden bg-zinc-900">
-                          {generatedVideo?.video_url ? (
-                             <>
-                               <motion.img src={generatedVideo?.video_url} className="w-full h-full object-cover opacity-60" initial={{ scale: 1 }} animate={{ scale: 1.15 }} transition={{ duration: 10, repeat: Infinity, repeatType: "reverse", ease: "linear" }} />
-                               {track?.file_url && (
-                                 <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-10 w-3/4 max-w-sm">
-                                   <audio src={track.file_url} controls autoPlay loop className="w-full opacity-80 hover:opacity-100 transition-opacity rounded-full shadow-2xl" />
-                                 </div>
-                               )}
-                             </>
-                          ) : (
-                             <div className="w-full h-full bg-gradient-to-br from-orange-500/20 to-purple-500/20 opacity-60" />
-                          )}
-                       </div>
-                    )}
+                 <div className="aspect-[9/16] bg-black rounded-[3rem] border border-zinc-900 overflow-hidden relative shadow-2xl group">
+                    <video 
+                      src={generatedVideo?.video_url} 
+                      className="w-full h-full object-cover opacity-60"
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      controls={false}
+                      onCanPlay={(e) => e.currentTarget.play()}
+                    />
                     
                     {/* Overlay Graphics */}
                     <div className="absolute inset-0 p-8 flex flex-col justify-between pointer-events-none">
