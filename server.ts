@@ -7,10 +7,9 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3000;
 
-app.use(express.json({ limit: '100mb' }));
-app.use(express.urlencoded({ limit: '100mb', extended: true }));
+app.use(express.json());
 
 // Initialize Gemini
 let ai: GoogleGenAI | null = null;
@@ -26,12 +25,6 @@ if (process.env.GEMINI_API_KEY) {
 }
 
 // API Routes
-app.get("/api/config", (req, res) => {
-  res.json({
-    supabaseUrl: process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || null,
-    supabaseAnonKey: process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || null
-  });
-});
 app.post("/api/analyze-metadata", async (req, res) => {
   if (!ai) return res.status(500).json({ error: "Gemini API key is not configured. Please add GEMINI_API_KEY to your .env file." });
   const { fileName } = req.body;
@@ -39,7 +32,7 @@ app.post("/api/analyze-metadata", async (req, res) => {
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.5-flash",
       contents: `Analyze this music track name: "${fileName}". Suggest its likely BPM (number), Key Signature (string like "Am", "F#m", "C"), approximate duration in seconds, and 3-5 descriptive tags (genres/moods). Return as JSON.`,
       config: {
         responseMimeType: "application/json",
@@ -89,7 +82,7 @@ app.post("/api/generate-promo", async (req, res) => {
     3. Generic: A 2-sentence pitch.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -137,7 +130,7 @@ app.post("/api/generate-aesthetic", async (req, res) => {
     Return a prompt for image generation that would work as a background for a promo video.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",

@@ -32,15 +32,6 @@ import {
   Video
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer 
-} from 'recharts';
 import { useMediaStore } from './context/MediaStoreContext';
 import { useAudio } from './context/AudioContext';
 import Shell from './components/Shell';
@@ -56,19 +47,10 @@ import EditClientModal from './components/EditClientModal';
 import VideoGenerationModal from './components/VideoGenerationModal';
 import VideoPreviewModal from './components/VideoPreviewModal';
 import SharePortal from './components/SharePortal';
+import ClientPortal from './components/ClientPortal';
 import ShareModal from './components/ShareModal';
 import { Track, ShareLink, Client, Playlist } from './types';
 import { cn } from './lib/utils';
-
-const chartData = [
-  { name: 'Mon', value: 400 },
-  { name: 'Tue', value: 300 },
-  { name: 'Wed', value: 200 },
-  { name: 'Thu', value: 280 },
-  { name: 'Fri', value: 180 },
-  { name: 'Sat', value: 240 },
-  { name: 'Sun', value: 360 },
-];
 
 export default function App() {
   const [activeView, setActiveView] = useState<'dashboard' | 'tracks' | 'playlists' | 'clients' | 'messages' | 'sharing' | 'activity' | 'settings' | 'profile' | 'client-detail' | 'videos'>('dashboard');
@@ -85,6 +67,7 @@ export default function App() {
   const [selectedVideoForPreview, setSelectedVideoForPreview] = useState<any | null>(null);
   const [showUpload, setShowUpload] = useState(false);
   const [shareToken, setShareToken] = useState<string | null>(null);
+  const [clientPortalUser, setClientPortalUser] = useState<Client | null>(null);
   const [sharingAsset, setSharingAsset] = useState<{ track?: Track, playlist?: Playlist } | null>(null);
   const [showAddClient, setShowAddClient] = useState(false);
   const [clientMessageDraft, setClientMessageDraft] = useState('');
@@ -101,12 +84,6 @@ export default function App() {
   } = useMediaStore();
   const hasIncrementedRef = React.useRef<string | null>(null);
 
-  useEffect(() => {
-    if (sharedContent?.link && hasIncrementedRef.current !== sharedContent.link.id) {
-      incrementShareLinkAccess(sharedContent.link.id);
-      hasIncrementedRef.current = sharedContent.link.id;
-    }
-  }, [sharedContent, incrementShareLinkAccess]);
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const selectedPlaylist = useMemo(() => playlists.find(p => p.id === selectedPlaylistId) || null, [playlists, selectedPlaylistId]);
 
@@ -178,14 +155,19 @@ export default function App() {
   };
 
   const handleDeleteTrack = async (id: string) => {
-    const track = tracks.find(t => t.id === id);
-    if (!track) return;
-
-    if (confirm(`PURGE AUTHORIZATION: Are you sure you want to permanently delete "${track.name}" from the master library? This cannot be undone.`)) {
-      if (activeTrack?.id === id) {
-        stop();
-      }
+    console.log(`[App] handleDeleteTrack called for ID: ${id}`);
+    
+    // Stop audio if deleting active track
+    if (activeTrack?.id === id) {
+      console.log(`[App] Deleting active track, stopping audio.`);
+      stop();
+    }
+    
+    try {
       await deleteTrack(id);
+      console.log(`[App] deleteTrack context call completed for ID: ${id}`);
+    } catch (err) {
+      console.error(`[App] Error in handleDeleteTrack for ID: ${id}:`, err);
     }
   };
 
@@ -277,14 +259,26 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token') || params.get('share');
+    const portalClient = params.get('client_portal');
+
     if (token) setShareToken(token);
-  }, []);
+    if (portalClient && clients.length > 0) {
+       const client = clients.find(c => c.id === portalClient);
+       if (client) {
+          setClientPortalUser(client);
+       }
+    }
+  }, [clients]);
 
   const sharedContent = useMemo(() => {
     if (!shareToken || loading || tracks.length === 0 || shareLinks.length === 0) return null;
     
     const link = shareLinks.find(l => l.token === shareToken);
-    if (!link) return null;
+    if (!link) return { invalid: true };
+
+    if (link.expires_at && new Date(link.expires_at) < new Date()) {
+       return { expired: true };
+    }
 
     if (link.track_id) {
        const track = tracks.find(t => t.id === link.track_id);
@@ -294,11 +288,18 @@ export default function App() {
        if (playlist) return { playlist, link };
     }
 
-    return null;
+    return { invalid: true };
   }, [shareToken, tracks, playlists, shareLinks, loading]);
 
+  useEffect(() => {
+    if (sharedContent?.link && hasIncrementedRef.current !== sharedContent.link.id) {
+      incrementShareLinkAccess(sharedContent.link.id);
+      hasIncrementedRef.current = sharedContent.link.id;
+    }
+  }, [sharedContent, incrementShareLinkAccess]);
+
   if (shareToken) {
-    if (sharedContent) {
+    if (sharedContent && sharedContent.link) {
       return <SharePortal track={sharedContent.track} playlist={sharedContent.playlist} shareLink={sharedContent.link} />;
     }
     if (loading) {
@@ -317,22 +318,40 @@ export default function App() {
     // If not loading and no content, maybe link is dead. We can either show an error or fall through.
     // Let's show a clean error for better UX.
     return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center space-y-8 p-8">
-        <div className="w-20 h-20 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
-          <X className="w-10 h-10 text-rose-500" />
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center space-y-8 p-8 selection:bg-orange-500 selection:text-black">
+        <div className="w-24 h-24 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-8 shadow-[0_0_100px_rgba(239,68,68,0.2)]">
+          <Lock className="w-10 h-10 text-red-500" />
         </div>
         <div className="text-center space-y-4 max-w-md">
           <h2 className="text-3xl font-black italic uppercase tracking-tighter">Access Token Invalid</h2>
-          <p className="text-zinc-500 text-sm font-medium">This share link may have expired or been revoked by the production team. Please request a new reference link.</p>
+          <p className="text-zinc-500 text-sm font-medium">
+             {sharedContent?.expired ? "This share link has expired and self-destructed. Please request a new reference link from the producer." : "This share link is invalid or has been revoked by the production team."}
+          </p>
         </div>
         <button 
           onClick={() => window.location.href = window.location.origin}
-          className="px-8 py-4 bg-zinc-900 border border-zinc-800 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-zinc-800 transition-colors"
+          className="mt-8 px-8 py-4 bg-zinc-900 border border-zinc-800 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-zinc-800 transition-colors text-white"
         >
-          Return to Hub
+          Return Home
         </button>
       </div>
     );
+  }
+
+  if (clientPortalUser) {
+    if (loading) {
+      return (
+        <div className="min-h-screen bg-black flex flex-col items-center justify-center space-y-6">
+          <div className="w-16 h-16 rounded-[2rem] bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+            <Music className="w-8 h-8 text-orange-500 animate-pulse" />
+          </div>
+          <div className="text-center space-y-2">
+            <h2 className="text-sm font-black uppercase tracking-[0.3em] text-white">Loading Client Portal</h2>
+          </div>
+        </div>
+      );
+    }
+    return <ClientPortal client={clientPortalUser} />;
   }
 
   const filteredTracks = useMemo(() => {
@@ -461,84 +480,13 @@ export default function App() {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Total Tracks', value: tracks.length, trend: '+12%', up: true, icon: Music },
-          { label: 'Active Clients', value: clients.length, trend: '+4%', up: true, icon: Users },
-          { label: 'Total Plays', value: tracks.reduce((acc, t) => acc + t.plays, 0), trend: '+22%', up: true, icon: Play },
-          { label: 'Engagement', value: '0%', trend: '-2%', up: false, icon: ActivityIcon },
-        ].map((stat, i) => (
-          <div key={i} className="bg-zinc-950 border border-zinc-900 p-6 rounded-[2rem] relative group hover:border-zinc-800 transition-colors">
-            <div className="flex justify-between items-start mb-4">
-              <div className="w-10 h-10 rounded-xl bg-zinc-900 flex items-center justify-center text-zinc-500 group-hover:text-orange-500 transition-colors">
-                <stat.icon className="w-5 h-5" />
-              </div>
-              <div className={cn(
-                "flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-black",
-                stat.up ? "text-emerald-500 bg-emerald-500/10" : "text-rose-500 bg-rose-500/10"
-              )}>
-                {stat.up ? <ArrowUpRight className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                {stat.trend}
-              </div>
-            </div>
-            <p className="text-4xl font-black tracking-tighter">{stat.value}</p>
-            <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.2em] mt-1">{stat.label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Main Grid: Performance & Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Performance Chart */}
-        <div className="lg:col-span-2 bg-zinc-950 border border-zinc-900 rounded-[2.5rem] p-8 space-y-8">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-black tracking-tight uppercase">Performance Overview</h2>
-            <select className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs font-bold text-zinc-400 outline-none">
-              <option>Last 7 Days</option>
-              <option>Last 30 Days</option>
-            </select>
-          </div>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#18181b" />
-                <XAxis 
-                  dataKey="name" 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#52525b', fontSize: 12, fontWeight: 700 }}
-                  dy={10}
-                />
-                <YAxis hide />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#09090b', border: '1px solid #18181b', borderRadius: '12px' }}
-                  itemStyle={{ color: '#f97316', fontWeight: 900, fontSize: '12px' }}
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="value" 
-                  stroke="#f97316" 
-                  strokeWidth={3}
-                  fillOpacity={1} 
-                  fill="url(#colorValue)" 
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
+      {/* Dashboard Content */}
+      <div className="grid grid-cols-1 gap-6">
           {/* Recent Activity */}
         <div className="bg-zinc-950 border border-zinc-900 rounded-[2.5rem] p-8 flex flex-col">
           <h2 className="text-xl font-black tracking-tight uppercase mb-8">Recent Activity</h2>
-          <div className="space-y-6 flex-1 overflow-y-auto max-h-[400px] pr-2 scrollbar-hide">
-             {activities.slice().sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 10).map((act) => {
+          <div className="space-y-6 flex-1 overflow-y-auto max-h-[600px] pr-2 scrollbar-hide">
+             {activities.slice().sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 20).map((act) => {
                const { Icon, color, bg } = getActivityIcon(act.type);
                return (
                  <div key={act.id} className="flex gap-4 items-start group">
@@ -561,14 +509,14 @@ export default function App() {
                );
              })}
              {activities.length === 0 && (
-               <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
-                  <ActivityIcon className="w-10 h-10 mb-4" />
-                  <p className="text-[10px] font-black uppercase tracking-widest">No recent transactions</p>
+               <div className="py-20 flex flex-col items-center justify-center text-center opacity-40">
+                  <ActivityIcon className="w-12 h-12 mb-4" />
+                  <p className="text-xs font-black uppercase tracking-widest">No recent transaction logs</p>
                </div>
              )}
           </div>
           <button onClick={() => setActiveView('activity')} className="w-full mt-8 pt-6 border-t border-zinc-900 text-center text-[10px] font-black uppercase tracking-widest text-zinc-600 hover:text-white transition-colors">
-            View All Activity
+            View Expanded Activity Ledger
           </button>
         </div>
       </div>
@@ -632,18 +580,40 @@ export default function App() {
                    <div className="px-3 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-[10px] font-black tracking-widest uppercase text-white shadow-lg">
                       {track.status}
                    </div>
-                   <TrackOptionsMenu 
-                    track={track}
-                    onEdit={() => setEditingTrack(track)}
-                    onShare={() => handleShare(track)}
-                    onDownload={() => handleDownload(track)}
-                    onDelete={() => handleDeleteTrack(track.id)}
-                    onCreatePromo={() => setSelectedTrackForPromo(track)}
-                    onCreateVideo={() => setSelectedTrackForVideo(track)}
-                    onAddToPlaylist={(plId) => addTrackToPlaylist(track.id, plId)}
-                    playlists={playlists}
-                    className="bg-black/40 backdrop-blur-md rounded-full border border-white/10"
-                   />
+                    <div className="flex items-center gap-2">
+                     <button 
+                       onClick={(e) => {
+                         e.stopPropagation();
+                         setEditingTrack(track);
+                       }}
+                       className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md border border-white/10 flex items-center justify-center text-white hover:bg-white hover:text-black transition-all"
+                       title="Edit Track"
+                     >
+                       <Edit3 className="w-5 h-5" />
+                     </button>
+                     <button 
+                       onClick={(e) => {
+                         e.stopPropagation();
+                         handleDeleteTrack(track.id);
+                       }}
+                       className="w-10 h-10 rounded-full bg-rose-500/20 backdrop-blur-md border border-rose-500/30 flex items-center justify-center text-rose-500 hover:bg-rose-500 hover:text-white transition-all"
+                       title="Delete Track"
+                     >
+                       <Trash2 className="w-5 h-5" />
+                     </button>
+                     <TrackOptionsMenu 
+                      track={track}
+                      onEdit={() => setEditingTrack(track)}
+                      onShare={() => handleShare(track)}
+                      onDownload={() => handleDownload(track)}
+                      onDelete={() => handleDeleteTrack(track.id)}
+                      onCreatePromo={() => setSelectedTrackForPromo(track)}
+                      onCreateVideo={() => setSelectedTrackForVideo(track)}
+                      onAddToPlaylist={(plId) => addTrackToPlaylist(track.id, plId)}
+                      playlists={playlists}
+                      className="bg-black/40 backdrop-blur-md rounded-full border border-white/10"
+                     />
+                   </div>
                 </div>
              </div>
 
@@ -918,12 +888,28 @@ export default function App() {
                         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
                     </div>
                     
-                    <div className="absolute top-6 right-6">
+                    <div className="absolute top-6 right-6 flex items-center gap-2">
+                       <TrackOptionsMenu 
+                         track={track}
+                         onEdit={() => setEditingTrack(track)}
+                         onShare={() => handleShare(track)}
+                         onDownload={() => handleDownload(track)}
+                         onDelete={() => handleDeleteTrack(track.id)}
+                         onCreatePromo={() => setSelectedTrackForPromo(track)}
+                         onCreateVideo={() => setSelectedTrackForVideo(track)}
+                         onAddToPlaylist={(plId) => addTrackToPlaylist(track.id, plId)}
+                         playlists={playlists}
+                         className="bg-black/40 backdrop-blur-md rounded-full border border-white/10"
+                       />
                        <button 
-                         onClick={() => handleRemoveTrackFromPlaylist(track.id, selectedPlaylist.id)}
-                         className="w-10 h-10 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center text-rose-500 hover:bg-rose-500 hover:text-white transition-all opacity-0 group-hover:opacity-100"
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           handleRemoveTrackFromPlaylist(track.id, selectedPlaylist.id);
+                         }}
+                         title="Remove from Playlist"
+                         className="w-10 h-10 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center text-rose-500 hover:bg-rose-500 hover:text-white transition-all"
                        >
-                         <Plus className="w-5 h-5 rotate-45" />
+                         <X className="w-5 h-5" />
                        </button>
                     </div>
 
@@ -939,8 +925,8 @@ export default function App() {
                             <Play className="w-5 h-5 fill-black ml-1" />
                           </button>
                           <div className="flex flex-col">
-                            <span className="text-[10px] font-black text-white/40 uppercase tracking-[0.2em]">{track.bpm} BPM</span>
-                            <span className="text-[10px] font-black text-white/40 uppercase tracking-[0.2em]">{track.key_signature}</span>
+                            <span className="text-[10px] font-black text-white/40 uppercase tracking-[0.2em]">{track.bpm} BPM • {track.key_signature}</span>
+                            <span className="text-[10px] font-black text-white/40 uppercase tracking-[0.2em]">{(track.plays / 1000).toFixed(1)}k Plays</span>
                           </div>
                         </div>
                     </div>
@@ -1520,18 +1506,13 @@ export default function App() {
               </div>
             </div>
 
-            <div className="p-8 bg-orange-500 rounded-[2.5rem] text-black">
-               <Zap className="w-8 h-8 mb-4" />
-               <h3 className="text-xl font-black uppercase tracking-tight italic">Studio Stats</h3>
-               <div className="mt-6 flex justify-between border-t border-black/10 pt-4">
-                  <div>
-                    <p className="text-[10px] font-black uppercase">Projects</p>
-                    <p className="text-2xl font-black">{tracks.length}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[10px] font-black uppercase">Clients</p>
-                    <p className="text-2xl font-black">{clients.length}</p>
-                  </div>
+            <div className="p-8 bg-zinc-900 border border-zinc-800 rounded-[2.5rem] flex items-center gap-6">
+               <div className="w-16 h-16 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center">
+                  <Zap className="w-8 h-8 text-orange-500" />
+               </div>
+               <div>
+                  <h3 className="text-xl font-black uppercase tracking-tight italic">Elite Producer Account</h3>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mt-1">Authorized access to OGBeatz Proprietary Hub</p>
                </div>
             </div>
           </div>
@@ -1609,6 +1590,15 @@ export default function App() {
                 ))}
              </div>
              <div className="flex gap-3">
+                <button 
+                    onClick={() => {
+                       const url = `${window.location.origin}/?client_portal=${selectedClient.id}`;
+                       window.open(url, '_blank');
+                    }}
+                    className="border border-zinc-800 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-orange-500 hover:text-orange-500 transition-colors"
+                >
+                    View Portal
+                </button>
                 <button 
                     onClick={() => zipInputRef.current?.click()}
                     className="bg-orange-500 text-black px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-transform shadow-xl shadow-orange-500/20"
@@ -1932,6 +1922,7 @@ export default function App() {
             track={editingTrack}
             onClose={() => setEditingTrack(null)}
             onSave={updateTrack}
+            onDelete={handleDeleteTrack}
           />
         )}
         {editingPlaylist && (

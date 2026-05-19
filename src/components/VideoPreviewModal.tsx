@@ -1,5 +1,5 @@
-import React from 'react';
-import { X, Download, Share2, Trash2 } from 'lucide-react';
+import React, { useRef, useEffect } from 'react';
+import { X, Download, Share2, Trash2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PromoVideo } from '../types';
 import { useMediaStore } from '../context/MediaStoreContext';
@@ -11,9 +11,34 @@ interface VideoPreviewModalProps {
 
 export default function VideoPreviewModal({ video, onClose }: VideoPreviewModalProps) {
   const { deletePromoVideo, tracks, playlists } = useMediaStore();
-  const sourceName = tracks.find(t => t.id === video.track_id)?.name || 
-                    playlists.find(p => p.id === video.playlist_id)?.name || 
-                    'Unknown Asset';
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const track = tracks.find(t => t.id === video.track_id);
+  const playlist = playlists.find(p => p.id === video.playlist_id);
+  const sourceName = track?.name || playlist?.name || 'Untitled Asset';
+
+  useEffect(() => {
+    if (videoRef.current && !video._brokenBlob) {
+      // Try to play with sound first, if it fails, try muted
+      const playPromise = videoRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(() => {
+          console.warn("Autoplay with sound blocked, trying muted...");
+          if (videoRef.current) {
+            videoRef.current.muted = true;
+            videoRef.current.play();
+          }
+        });
+      }
+    }
+  }, [video.video_url, video._brokenBlob]);
+
+  const handleDelete = () => {
+    if (confirm('Permanently delete this promo asset?')) {
+      deletePromoVideo(video.id);
+      onClose();
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
@@ -32,13 +57,55 @@ export default function VideoPreviewModal({ video, onClose }: VideoPreviewModalP
         className="relative w-full max-w-5xl bg-zinc-950 border border-zinc-900 rounded-[3.5rem] overflow-hidden shadow-2xl flex flex-col md:flex-row"
       >
         {/* Video Player Side */}
-        <div className="flex-1 bg-black aspect-video md:aspect-auto flex items-center justify-center relative group">
-           <video 
-             src={video.video_url} 
-             controls 
-             className="w-full h-full object-contain"
-             poster={video.thumbnail_url}
-           />
+        <div className="flex-1 bg-black min-h-[400px] aspect-video md:aspect-auto flex items-center justify-center relative group">
+           {video._brokenBlob ? (
+             <div className="flex flex-col items-center gap-4 text-center p-8">
+               <div className="w-16 h-16 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
+                 <AlertCircle className="w-8 h-8 text-rose-500" />
+               </div>
+               <div className="space-y-2">
+                 <h3 className="text-xl font-black uppercase tracking-widest text-rose-500">Asset Desynchronized</h3>
+                 <p className="text-zinc-500 text-xs max-w-xs mx-auto">This neural render cache was tied to a volatile session buffer and is no longer available. Re-rendering required.</p>
+               </div>
+             </div>
+           ) : (video.video_url?.match(/\.(mp4|webm|mov)$/i) || video.video_url?.startsWith('data:video') || video.video_url?.startsWith('blob:')) ? (
+             <video 
+               ref={videoRef}
+               src={video.video_url} 
+               controls 
+               playsInline
+               className="w-full h-full object-contain"
+               poster={video.thumbnail_url}
+               onLoadedData={() => {
+                 console.log("Video metadata and first frame loaded");
+               }}
+               onError={(e) => {
+                 const videoElement = e.currentTarget;
+                 console.error("Video load error:", videoElement.error);
+               }}
+             />
+           ) : (
+             <div className="w-full h-full relative overflow-hidden bg-black flex items-center justify-center">
+               <motion.img 
+                 src={video.video_url || 'https://images.unsplash.com/photo-1614113489855-66422ad300a4?w=800&q=80'}
+                 className="w-full h-full object-contain"
+                 initial={{ scale: 1 }}
+                 animate={{ scale: 1.05 }}
+                 transition={{ duration: 10, repeat: Infinity, repeatType: 'reverse', ease: 'linear' }}
+               />
+               {track?.file_url && (
+                 <audio 
+                   src={track.file_url} 
+                   autoPlay 
+                   controls 
+                   className="absolute bottom-8 w-3/4 max-w-md opacity-80 hover:opacity-100 transition-opacity z-10" 
+                 />
+               )}
+               <div className="absolute inset-x-0 bottom-0 top-0 pointer-events-none flex items-center justify-center">
+                  {/* Subtle indication that this is an image simulation */}
+               </div>
+             </div>
+           )}
            <div className="absolute top-8 left-8">
               <div className="px-4 py-2 bg-black/50 backdrop-blur-md border border-white/10 rounded-full text-[10px] font-black uppercase tracking-widest text-orange-500">
                 PROMO MASTER // {video.style.toUpperCase()}

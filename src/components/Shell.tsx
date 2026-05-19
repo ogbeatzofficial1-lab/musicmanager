@@ -97,12 +97,15 @@ export default function Shell({ children, activeView, onViewChange }: ShellProps
            </button>
 
            {!collapsed && (
-             <div className="bg-zinc-900/50 p-3 rounded-2xl border border-zinc-800 flex items-center gap-3">
-               <div className="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center text-xs font-black text-black shrink-0">
+             <div 
+               onClick={() => onViewChange('profile')}
+               className="bg-zinc-900/50 p-3 rounded-2xl border border-zinc-800 flex items-center gap-3 cursor-pointer hover:bg-zinc-800 transition-all group/profile"
+             >
+               <div className="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center text-xs font-black text-black shrink-0 shadow-lg shadow-orange-500/10 group-hover/profile:scale-110 transition-transform">
                  OB
                </div>
                <div className="flex flex-col min-w-0">
-                 <span className="text-xs font-bold truncate">OGBeatz Admin</span>
+                 <span className="text-xs font-bold truncate group-hover/profile:text-orange-500 transition-colors">OGBeatz Admin</span>
                  <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider truncate">PRO PRODUCER</span>
                </div>
              </div>

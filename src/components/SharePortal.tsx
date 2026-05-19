@@ -15,7 +15,7 @@ interface SharePortalProps {
 }
 
 export default function SharePortal({ track: initialTrack, playlist, shareLink }: SharePortalProps) {
-  const { tracks: allTracks, addActivity } = useMediaStore();
+  const { tracks: allTracks, addActivity, sendMessage } = useMediaStore();
   const [activeTrack, setActiveTrack] = useState<Track | null>(initialTrack || null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -30,6 +30,9 @@ export default function SharePortal({ track: initialTrack, playlist, shareLink }
     if (!playlist) return [];
     return allTracks.filter(t => playlist.track_ids.includes(t.id));
   }, [playlist, allTracks]);
+
+  // Load existing comments/messages for this track/client? 
+  // Let's just submit for now.
 
   useEffect(() => {
     if (playlistTracks.length > 0 && !activeTrack) {
@@ -107,7 +110,7 @@ export default function SharePortal({ track: initialTrack, playlist, shareLink }
     });
   };
 
-  const handleComment = (e: React.FormEvent) => {
+  const handleComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!comment.trim()) return;
     
@@ -122,6 +125,10 @@ export default function SharePortal({ track: initialTrack, playlist, shareLink }
       details: comment,
       client_id: shareLink.client_id
     });
+
+    if (shareLink.client_id) {
+       await sendMessage(shareLink.client_id, `[Feedback on ${activeTrack?.name || 'Asset'}]: ${comment}`);
+    }
 
     setComment('');
   };

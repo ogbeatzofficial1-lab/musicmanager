@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Track } from '../types';
-import { Save, X, Music, User, Activity, Clock, Image as ImageIcon } from 'lucide-react';
+import { Save, X, Music, User, Activity, Clock, Image as ImageIcon, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 
@@ -8,9 +8,10 @@ interface EditTrackModalProps {
   track: Track;
   onClose: () => void;
   onSave: (id: string, updates: Partial<Track>) => void;
+  onDelete: (id: string) => void;
 }
 
-export default function EditTrackModal({ track, onClose, onSave }: EditTrackModalProps) {
+export default function EditTrackModal({ track, onClose, onSave, onDelete }: EditTrackModalProps) {
   const [formData, setFormData] = useState<Partial<Track>>({
     name: track.name,
     artist: track.artist,
@@ -195,17 +196,30 @@ export default function EditTrackModal({ track, onClose, onSave }: EditTrackModa
           <div className="pt-4 flex items-center gap-3">
             <button 
               type="button"
-              onClick={onClose}
-              className="flex-1 px-6 py-4 border border-zinc-900 text-zinc-500 font-bold rounded-2xl hover:text-white hover:border-zinc-700 transition-all text-xs uppercase tracking-widest"
+              onClick={() => {
+                onDelete(track.id);
+                onClose();
+              }}
+              className="px-4 py-4 border border-rose-500/20 text-rose-500 font-bold rounded-2xl hover:bg-rose-500/5 transition-all text-xs uppercase tracking-widest flex items-center gap-2 group"
+              title="Delete Track"
             >
-              Cancel
+              <Trash2 className="w-4 h-4 group-hover:scale-110 transition-transform" />
             </button>
-            <button 
-              type="submit"
-              className="flex-1 bg-white text-black px-6 py-4 rounded-2xl font-black tracking-widest uppercase text-xs flex items-center justify-center gap-2 hover:scale-[1.02] transition-transform active:scale-[0.98]"
-            >
-              <Save className="w-4 h-4" /> Save Master
-            </button>
+            <div className="flex-1 flex gap-3">
+              <button 
+                type="button"
+                onClick={onClose}
+                className="flex-1 px-6 py-4 border border-zinc-900 text-zinc-500 font-bold rounded-2xl hover:text-white hover:border-zinc-700 transition-all text-xs uppercase tracking-widest"
+              >
+                Cancel
+              </button>
+              <button 
+                type="submit"
+                className="flex-1 bg-white text-black px-6 py-4 rounded-2xl font-black tracking-widest uppercase text-xs flex items-center justify-center gap-2 hover:scale-[1.02] transition-transform active:scale-[0.98]"
+              >
+                <Save className="w-4 h-4" /> Save Master
+              </button>
+            </div>
           </div>
         </form>
       </motion.div>

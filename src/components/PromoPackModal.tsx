@@ -27,47 +27,18 @@ export default function PromoPackModal({ track, onClose }: PromoPackModalProps) 
   const handleGenerate = async () => {
     setLoading(true);
     try {
-      const { GoogleGenAI, Type } = await import('@google/genai');
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const { generatePromoPack } = await import('../services/geminiService');
+      const data = await generatePromoPack(track);
       
-      const prompt = `Generate platform-optimized social copy for a music producer's new track.
-Track: ${track.name}
-Artist: ${track.artist}
-BPM: ${track.bpm}
-Key: ${track.key_signature}
-Brand Bio: ${profile?.bio || 'Premium sound architecture.'}
+      if (!data) throw new Error("Promo generation failed");
 
-STRICT CONSTRAINTS:
-- Avoid hobbyist/loop-maker language (type beat, lease, beatmaking).
-- Use industry-standard terms (producer, songwriter, master reference, new music).
-- YouTube: Title (<100 chars) + Description with timestamps.
-- Instagram: Clean, spaced caption with professional hashtags.
-
-Return as strict JSON.`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              youtube_copy: { type: Type.STRING },
-              instagram_copy: { type: Type.STRING },
-              generic_copy: { type: Type.STRING }
-            },
-            required: ["youtube_copy", "instagram_copy", "generic_copy"]
-          }
-        }
-      });
-      
-      const data = JSON.parse(response.text.trim());
       const newPromo: PromoPack = {
         id: Math.random().toString(36).substring(7),
         track_id: track.id,
         created_at: new Date().toISOString(),
-        ...data
+        youtube_copy: data.youtube?.title + "\n\n" + data.youtube?.description,
+        instagram_copy: data.instagram,
+        generic_copy: data.generic
       };
       
       setPromoData(newPromo);

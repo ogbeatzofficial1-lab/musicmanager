@@ -52,6 +52,8 @@ export default function AudioPlayer({ onEdit }: AudioPlayerProps) {
               <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">{activeTrack.artist}</span>
               <span className="text-zinc-700">•</span>
               <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">{activeTrack.bpm} BPM</span>
+              <span className="text-zinc-700">•</span>
+              <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">{(activeTrack.plays / 1000).toFixed(1)}k Plays</span>
             </div>
           </div>
           <button className="text-zinc-600 hover:text-orange-500 ml-2 transition-colors">

@@ -58,7 +58,30 @@ export default function ShareModal({ track, playlist, onClose }: ShareModalProps
     if (!shareLink) return;
     const subject = encodeURIComponent(`Master Reference: ${assetName}`);
     const body = encodeURIComponent(`Hey,\n\nI've uploaded a new master for you to review: ${assetName}.\n\nYou can listen and provide feedback here: ${shareLink}\n\nBest,\nOGBeatz`);
-    window.location.href = `mailto:${selectedClient?.email || ''}?subject=${subject}&body=${body}`;
+    const mailtoUrl = `mailto:${selectedClient?.email || ''}?subject=${subject}&body=${body}`;
+    
+    // In an iframe, direct window.location.href might be blocked
+    try {
+      const a = document.createElement('a');
+      a.href = mailtoUrl;
+      a.click();
+    } catch (err) {
+      window.open(mailtoUrl, '_blank');
+    }
+  };
+
+  const handleWhatsAppShare = () => {
+    if (!shareLink) return;
+    const text = encodeURIComponent('Hey, check out this master reference: ' + shareLink);
+    window.open(`https://wa.me/?text=${text}`, '_blank');
+  };
+
+  const handleMessengerShare = () => {
+    if (!shareLink) return;
+    // Messenger sharing works better with a direct link or the share dialog
+    window.open(`https://www.facebook.com/dialog/send?app_id=YOUR_FB_APP_ID&link=${encodeURIComponent(shareLink)}&redirect_uri=${encodeURIComponent(window.location.origin)}`, '_blank');
+    // Fallback if no APP_ID (generic share)
+    // window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareLink)}`, '_blank');
   };
 
   return (
@@ -247,13 +270,13 @@ export default function ShareModal({ track, playlist, onClose }: ShareModalProps
                         <Mail className="w-5 h-5 text-orange-500" /> Gmail
                       </button>
                       <button 
-                        onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent('Hey, check out this master reference: ' + shareLink)}`)}
+                        onClick={handleWhatsAppShare}
                         className="flex flex-col items-center justify-center gap-2 bg-zinc-900 border border-zinc-800 text-white h-20 rounded-2xl text-[8px] font-black uppercase tracking-[0.2em] hover:bg-zinc-800 transition-all"
                       >
                         <MessageCircle className="w-5 h-5 text-emerald-500" /> WhatsApp
                       </button>
                       <button 
-                        onClick={() => window.open(`fb-messenger://share/?link=${encodeURIComponent(shareLink!)}`)}
+                        onClick={handleMessengerShare}
                         className="flex flex-col items-center justify-center gap-2 bg-zinc-900 border border-zinc-800 text-white h-20 rounded-2xl text-[8px] font-black uppercase tracking-[0.2em] hover:bg-zinc-800 transition-all"
                       >
                         <Share2 className="w-5 h-5 text-blue-500" /> Messenger

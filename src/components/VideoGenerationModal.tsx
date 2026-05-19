@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Video, Sparkles, Wand2, Loader2, Play, CheckCircle2, AlertCircle, Share2, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useMediaStore } from '../context/MediaStoreContext';
 import { Track, Playlist, PromoVideo } from '../types';
 import { generateVideoAesthetic } from '../services/geminiService';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
 interface VideoGenerationModalProps {
   track?: Track;
@@ -18,6 +20,8 @@ export default function VideoGenerationModal({ track, playlist, onClose }: Video
   const [progress, setProgress] = useState(0);
   const [aesthetic, setAesthetic] = useState<any>(null);
   const [generatedVideo, setGeneratedVideo] = useState<PromoVideo | null>(null);
+  const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
+  const ffmpegRef = useRef(new FFmpeg());
 
   const name = track?.name || playlist?.name || 'Untitled';
   const artist = track?.artist || 'OGBeatz';
@@ -29,55 +33,111 @@ export default function VideoGenerationModal({ track, playlist, onClose }: Video
     { id: 'abstract', name: 'Ethereal Flow', icon: '🌫️' }
   ];
 
-  const handleGenerate = async () => {
-    setStep('processing');
-    setProgress(10);
+  useEffect(() => {
+    loadFFmpeg();
+  }, []);
 
-    // 1. Analyze aesthetic with Gemini
-    const trackInfo = track || { name, artist, bpm: 120, key_signature: 'C' };
-    const aes = await generateVideoAesthetic(trackInfo);
-    setAesthetic(aes);
-    setProgress(30);
+  const loadFFmpeg = async () => {
+    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+    const ffmpeg = ffmpegRef.current;
+    
+    // Set up progress tracking
+    ffmpeg.on('log', ({ message }) => {
+      console.log(message);
+    });
 
-    // 2. Simulate "Video Rendering"
-    const duration = 5000;
-    const interval = setInterval(() => {
-      setProgress(prev => {
-        if (prev >= 95) {
-          clearInterval(interval);
-          return 95;
-        }
-        return prev + Math.random() * 5;
+    ffmpeg.on('progress', ({ progress: p }) => {
+      // ffmpeg progress is from 0 to 1, we want to map it to 30-90% of our UI progress
+      const mappedProgress = 30 + (p * 60);
+      setProgress(mappedProgress);
+    });
+
+    try {
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
       });
-    }, 200);
+      setFfmpegLoaded(true);
+    } catch (err) {
+      console.error("FFmpeg Load Error:", err);
+    }
+  };
 
-    // Wait for simulation
-    await new Promise(resolve => setTimeout(resolve, duration));
-    clearInterval(interval);
-    
-    // 3. Create the "Video" record
-    const isSourceVideo = track?.type?.startsWith('video/');
-    const newVideo: Partial<PromoVideo> = {
-      track_id: track?.id,
-      playlist_id: playlist?.id,
-      video_url: isSourceVideo ? track.file_url : 'https://assets.mixkit.co/videos/preview/mixkit-abstract-graphic-of-red-and-blue-lines-9252-large.mp4',
-      thumbnail_url: track?.image_url || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=800',
-      style: style,
-      status: 'ready'
-    };
+  const handleGenerate = async () => {
+    if (!ffmpegLoaded) {
+      alert("FFmpeg is still initializing. Please wait a moment.");
+      return;
+    }
 
-    await addPromoVideo(newVideo);
-    
-    // Find the created video in the list (or we could return it from addPromoVideo)
-    // For now we'll just set a mock preview
-    setGeneratedVideo({
-      id: Math.random().toString(),
-      ...newVideo,
-      created_at: new Date().toISOString()
-    } as PromoVideo);
+    setStep('processing');
+    setProgress(5);
 
-    setProgress(100);
-    setStep('preview');
+    try {
+      // 1. Analyze aesthetic with Gemini
+      const trackInfo = track || { name, artist, bpm: 120, key_signature: 'C' };
+      const aes = await generateVideoAesthetic(trackInfo);
+      setAesthetic(aes);
+      setProgress(20);
+
+      const ffmpeg = ffmpegRef.current;
+
+      // Prepare assets
+      const audioUrl = track?.file_url;
+      const imageUrl = track?.image_url || playlist?.image_url || '/input_file_2.png';
+
+      if (!audioUrl) throw new Error("Audio source not found");
+
+      // Write files to FFmpeg FS
+      await ffmpeg.writeFile('audio.mp3', await fetchFile(audioUrl));
+      await ffmpeg.writeFile('image.png', await fetchFile(imageUrl));
+
+      // Run FFmpeg command
+      // -loop 1 -i image.png: loop image
+      // -i audio.mp3: audio input
+      // -c:v libx264: video codec
+      // -t 30: limit to 30 seconds for promo
+      // -pix_fmt yuv420p: compatibility
+      // -vf scale: scale to vertical format 1080x1920
+      await ffmpeg.exec([
+        '-loop', '1', 
+        '-i', 'image.png', 
+        '-i', 'audio.mp3', 
+        '-c:v', 'libx264', 
+        '-t', '15', // Generate 15s preview
+        '-pix_fmt', 'yuv420p', 
+        '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
+        'out.mp4'
+      ]);
+
+      const data = await ffmpeg.readFile('out.mp4');
+      const videoBlob = new Blob([data], { type: 'video/mp4' });
+      const videoUrl = URL.createObjectURL(videoBlob);
+
+      // 3. Create the "Video" record
+      const newVideo: Partial<PromoVideo> = {
+        track_id: track?.id,
+        playlist_id: playlist?.id,
+        video_url: videoUrl, 
+        thumbnail_url: imageUrl,
+        style: style,
+        status: 'ready'
+      };
+      
+      await addPromoVideo(newVideo);
+      
+      setGeneratedVideo({
+        id: Math.random().toString(),
+        ...newVideo,
+        created_at: new Date().toISOString()
+      } as PromoVideo);
+
+      setProgress(100);
+      setStep('preview');
+    } catch (err) {
+      console.error("Rendering Error:", err);
+      alert("Asset synthesis failed. FFmpeg might have encountered a codec mismatch.");
+      setStep('config');
+    }
   };
 
   return (
@@ -207,15 +267,34 @@ export default function VideoGenerationModal({ track, playlist, onClose }: Video
                 animate={{ opacity: 1, y: 0 }}
                 className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-12 items-center"
               >
-                 <div className="aspect-[9/16] bg-black rounded-[3rem] border border-zinc-900 overflow-hidden relative shadow-2xl group">
-                    <video 
-                      src={generatedVideo?.video_url} 
-                      className="w-full h-full object-cover opacity-60"
-                      autoPlay
-                      loop
-                      muted
-                      playsInline
-                    />
+                  <div className="aspect-[9/16] bg-black rounded-[3rem] border border-zinc-900 overflow-hidden relative shadow-2xl group">
+                    {(generatedVideo?.video_url?.match(/\.(mp4|webm|mov)$/i) || generatedVideo?.video_url?.startsWith('data:video') || generatedVideo?.video_url?.startsWith('blob:')) ? (
+                       <video 
+                         src={generatedVideo?.video_url} 
+                         className="w-full h-full object-cover opacity-60"
+                         autoPlay
+                         loop
+                         muted
+                         playsInline
+                         controls={false}
+                         onCanPlay={(e) => e.currentTarget.play()}
+                       />
+                    ) : (
+                       <div className="w-full h-full relative overflow-hidden bg-zinc-900">
+                          {generatedVideo?.video_url ? (
+                             <>
+                               <motion.img src={generatedVideo?.video_url} className="w-full h-full object-cover opacity-60" initial={{ scale: 1 }} animate={{ scale: 1.15 }} transition={{ duration: 10, repeat: Infinity, repeatType: "reverse", ease: "linear" }} />
+                               {track?.file_url && (
+                                 <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-10 w-3/4 max-w-sm">
+                                   <audio src={track.file_url} controls autoPlay loop className="w-full opacity-80 hover:opacity-100 transition-opacity rounded-full shadow-2xl" />
+                                 </div>
+                               )}
+                             </>
+                          ) : (
+                             <div className="w-full h-full bg-gradient-to-br from-orange-500/20 to-purple-500/20 opacity-60" />
+                          )}
+                       </div>
+                    )}
                     
                     {/* Overlay Graphics */}
                     <div className="absolute inset-0 p-8 flex flex-col justify-between pointer-events-none">

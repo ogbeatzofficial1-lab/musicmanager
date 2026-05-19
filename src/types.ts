@@ -30,6 +30,7 @@ export interface Track {
   likes: number;
   status: TrackStatus;
   created_at: string;
+  _brokenBlob?: boolean;
 }
 
 export interface Playlist {
@@ -110,4 +111,5 @@ export interface PromoVideo {
   style: string;
   status: "processing" | "ready" | "failed";
   created_at: string;
+  _brokenBlob?: boolean;
 }

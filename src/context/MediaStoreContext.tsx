@@ -53,24 +53,49 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     async function init() {
       if (supabase) {
         try {
-          const { data: trData } = await supabase.from('tracks').select('*');
-          const { data: plData } = await supabase.from('playlists').select('*');
-          const { data: clData } = await supabase.from('clients').select('*');
-          const { data: slData } = await supabase.from('share_links').select('*');
-          const { data: actData } = await supabase.from('activities').select('*');
-          const { data: msgData } = await supabase.from('messages').select('*');
-          const { data: pvData } = await supabase.from('promo_videos').select('*');
+          const fetchSafely = async (table: string) => {
+            const { data, error } = await supabase!.from(table).select('*');
+            if (error) {
+              console.warn(`Error fetching ${table}:`, error);
+              return null;
+            }
+            return data;
+          };
 
-          setTracks(trData || []);
-          setPlaylists(plData || []);
-          setClients(clData || []);
-          setShareLinks(slData || []);
-          setActivities(actData || []);
-          setMessages(msgData || []);
-          setPromoVideos(pvData || []);
+          const trData = await fetchSafely('tracks');
+          const plData = await fetchSafely('playlists');
+          const clData = await fetchSafely('clients');
+          const slData = await fetchSafely('share_links');
+          const actData = await fetchSafely('activities');
+          const msgData = await fetchSafely('messages');
+          const pvData = await fetchSafely('promo_videos');
+
+          // Only fallback to local if fetch failed
+          const safeParseList = (tableData: any, localKey: string) => {
+            if (tableData) return tableData;
+            const locally = localStorage.getItem(localKey);
+            return locally ? JSON.parse(locally) : [];
+          };
+
+          setTracks(safeParseList(trData, 'mm_tracks'));
+          setPlaylists(safeParseList(plData, 'mm_playlists'));
+          setClients(safeParseList(clData, 'mm_clients'));
+          setShareLinks(safeParseList(slData, 'mm_share_links'));
+          setActivities(safeParseList(actData, 'mm_activities'));
+          setMessages(safeParseList(msgData, 'mm_messages'));
+          setPromoVideos(safeParseList(pvData, 'mm_promo_videos'));
           
-          const { data: profData } = await supabase.from('profiles').select('*').single();
-          setProfile(profData || null);
+          const { data: profData, error: profError } = await supabase.from('profiles').select('*').single();
+          if (profError && profError.code !== 'PGRST116') { // Ignore zero rows error for profile
+            console.warn("Profile fetch error:", profError);
+          }
+          if (profData) {
+            setProfile(profData);
+          } else {
+             const localProf = localStorage.getItem('mm_profile');
+             setProfile(localProf ? JSON.parse(localProf) : null);
+          }
+
         } catch (e) {
           console.error("Supabase load error:", e);
           loadFromLocal();
@@ -87,65 +112,33 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
       const localClients = localStorage.getItem('mm_clients');
       const localShareLinks = localStorage.getItem('mm_share_links');
       const localMessages = localStorage.getItem('mm_messages');
+      const localPromoVideos = localStorage.getItem('mm_promo_videos');
       const localProfile = localStorage.getItem('mm_profile');
       
-      let parsedTracks = localTracks ? JSON.parse(localTracks) : null;
+      let parsedTracks = localTracks ? JSON.parse(localTracks) : [];
       
-      if (parsedTracks === null) {
-        // Initial state: Seed sample tracks
-        const sampleTracks: Track[] = [
-          {
-            id: 'sample-1',
-            name: 'Vapor Wave Master',
-            artist: 'OGBeatz',
-            duration: 184,
-            bpm: 128,
-            key_signature: 'Am',
-            tags: ['Vaporwave', 'Electronic', 'Chill'],
-            file_url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-            image_url: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=600&h=600&fit=crop',
-            size: 5000000,
-            type: 'audio/mpeg',
-            plays: 12500,
-            likes: 450,
-            status: 'ready',
-            created_at: new Date().toISOString()
-          },
-          {
-            id: 'sample-2',
-            name: 'Neon Nights Edit',
-            artist: 'OGBeatz',
-            duration: 215,
-            bpm: 95,
-            key_signature: 'F#m',
-            tags: ['Neon', 'Synthwave', 'Upbeat'],
-            file_url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-            image_url: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&h=800&fit=crop',
-            size: 6000000,
-            type: 'audio/mpeg',
-            plays: 8900,
-            likes: 310,
-            status: 'ready',
-            created_at: new Date().toISOString()
-          }
-        ];
-        setTracks(sampleTracks);
-        safeSave('mm_tracks', sampleTracks);
-      } else {
-        // Filter out broken blobs if needed, but don't re-seed if empty
-        const cleanedTracks = parsedTracks.map((t: Track) => {
-          if (t.file_url?.startsWith('blob:')) {
-            return { ...t, _brokenBlob: true }; 
-          }
-          return t;
-        });
-        setTracks(cleanedTracks);
-      }
+      const cleanedTracks = (parsedTracks || []).map((t: Track) => {
+        if (t.file_url?.startsWith('blob:')) {
+          return { ...t, _brokenBlob: true }; 
+        }
+        return t;
+      });
+      setTracks(cleanedTracks);
 
       setPlaylists(localPlaylists ? JSON.parse(localPlaylists) : []);
       setClients(localClients ? JSON.parse(localClients) : []);
       setMessages(localMessages ? JSON.parse(localMessages) : []);
       setShareLinks(localShareLinks ? JSON.parse(localShareLinks) : []);
+      
+      const parsedVideos = localPromoVideos ? JSON.parse(localPromoVideos) : [];
+      const cleanedVideos = (parsedVideos || []).map((v: PromoVideo) => {
+        if (v.video_url?.startsWith('blob:')) {
+          return { ...v, _brokenBlob: true };
+        }
+        return v;
+      });
+      setPromoVideos(cleanedVideos);
+      
       setActivities([]);
       
       const defaultProfile: UserProfile = {
@@ -212,10 +205,10 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     const updated = [...tracks, newTrack];
     setTracks(updated);
     
+    safeSave('mm_tracks', updated);
     if (supabase) {
-      await supabase.from('tracks').insert(newTrack);
-    } else {
-      safeSave('mm_tracks', updated);
+      const { error } = await supabase.from('tracks').insert(newTrack);
+      if (error) console.error(error);
     }
 
     addActivity({
@@ -232,45 +225,62 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
   const updateTrack = async (id: string, updates: Partial<Track>) => {
     const updated = tracks.map(t => t.id === id ? { ...t, ...updates } : t);
     setTracks(updated);
+    safeSave('mm_tracks', updated);
     if (supabase) {
-      await supabase.from('tracks').update(updates).eq('id', id);
-    } else {
-      safeSave('mm_tracks', updated);
+      const { error } = await supabase.from('tracks').update(updates).eq('id', id);
+      if (error) console.error(error);
     }
   };
 
   const deleteTrack = async (id: string) => {
-    const updatedTracks = tracks.filter(t => t.id !== id);
-    setTracks(updatedTracks);
-    
-    // Cascading delete: remove from playlists and clean up local states
-    const updatedPlaylists = playlists.map(pl => ({
-      ...pl,
-      track_ids: pl.track_ids.filter(tid => tid !== id)
-    }));
-    setPlaylists(updatedPlaylists);
+    console.log(`[MediaStore] Initializing deletion for track: ${id}`);
+    try {
+      // 1. Update React states using functional updates to ensure consistency
+      setTracks(prev => prev.filter(t => t.id !== id));
+      setPlaylists(prev => prev.map(pl => ({
+        ...pl,
+        track_ids: (pl.track_ids || []).filter(tid => tid !== id)
+      })));
+      setPromoVideos(prev => prev.filter(v => v.track_id !== id));
+      setShareLinks(prev => prev.filter(l => l.track_id !== id));
 
-    const updatedPromoVideos = promoVideos.filter(v => v.track_id !== id);
-    setPromoVideos(updatedPromoVideos);
+      // 2. Persist to local storage (or DB if available)
+      if (supabase) {
+        await Promise.all([
+          supabase.from('share_links').delete().eq('track_id', id),
+          supabase.from('promo_videos').delete().eq('track_id', id),
+          supabase.from('tracks').delete().eq('id', id)
+        ]);
+      } else {
+        // Compute and save to local storage immediately
+        const localTracks = JSON.parse(localStorage.getItem('mm_tracks') || '[]');
+        safeSave('mm_tracks', localTracks.filter((t: any) => t.id !== id));
+        
+        const localPlaylists = JSON.parse(localStorage.getItem('mm_playlists') || '[]');
+        safeSave('mm_playlists', localPlaylists.map((pl: any) => ({
+          ...pl,
+          track_ids: (pl.track_ids || []).filter((tid: any) => tid !== id)
+        })));
+        
+        const localVideos = JSON.parse(localStorage.getItem('mm_promo_videos') || '[]');
+        safeSave('mm_promo_videos', localVideos.filter((v: any) => v.track_id !== id));
+        
+        const localLinks = JSON.parse(localStorage.getItem('mm_share_links') || '[]');
+        safeSave('mm_share_links', localLinks.filter((l: any) => l.track_id !== id));
+      }
 
-    const updatedShareLinks = shareLinks.filter(l => l.track_id !== id);
-    setShareLinks(updatedShareLinks);
-
-    if (supabase) {
-      await supabase.from('tracks').delete().eq('id', id);
-    } else {
-      safeSave('mm_tracks', updatedTracks);
-      safeSave('mm_playlists', updatedPlaylists);
-      safeSave('mm_promo_videos', updatedPromoVideos);
-      safeSave('mm_share_links', updatedShareLinks);
+      addActivity({
+        type: 'system',
+        user: 'OGBeatz',
+        action: `Purged asset ${id} from reference library`,
+        timestamp: new Date().toISOString()
+      });
+      
+      console.log(`[MediaStore] Successfully deleted track: ${id}`);
+    } catch (error) {
+      console.error("[MediaStore] Deletion Failure:", error);
+      alert("Terminal delete operation failed. Please check network connectivity or permissions.");
     }
-
-    addActivity({
-      type: 'system',
-      user: 'OGBeatz',
-      action: `Deleted track ${id}`,
-      timestamp: new Date().toISOString()
-    });
   };
 
   const addTrackToPlaylist = async (trackId: string, playlistId: string) => {
@@ -282,7 +292,11 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
       return pl;
     });
     setPlaylists(updated);
-    if (!supabase) safeSave('mm_playlists', updated);
+    safeSave('mm_playlists', updated);
+    if (supabase) {
+      const { error } = await supabase.from('playlists').update({ track_ids: updated.find(p => p.id === playlistId)?.track_ids }).eq('id', playlistId);
+      if (error) console.error(error);
+    }
   };
 
   const removeTrackFromPlaylist = async (trackId: string, playlistId: string) => {
@@ -293,27 +307,30 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
       return pl;
     });
     setPlaylists(updated);
-    if (!supabase) safeSave('mm_playlists', updated);
-    else await supabase.from('playlists').update({ track_ids: updated.find(p => p.id === playlistId)?.track_ids }).eq('id', playlistId);
+    safeSave('mm_playlists', updated);
+    if (supabase) {
+      const { error } = await supabase.from('playlists').update({ track_ids: updated.find(p => p.id === playlistId)?.track_ids }).eq('id', playlistId);
+      if (error) console.error(error);
+    }
   };
 
   const updatePlaylist = async (id: string, updates: Partial<Playlist>) => {
     const updated = playlists.map(pl => pl.id === id ? { ...pl, ...updates } : pl);
     setPlaylists(updated);
+    safeSave('mm_playlists', updated);
     if (supabase) {
-      await supabase.from('playlists').update(updates).eq('id', id);
-    } else {
-      safeSave('mm_playlists', updated);
+      const { error } = await supabase.from('playlists').update(updates).eq('id', id);
+      if (error) console.error(error);
     }
   };
 
   const deletePlaylist = async (id: string) => {
     const updated = playlists.filter(pl => pl.id !== id);
     setPlaylists(updated);
+    safeSave('mm_playlists', updated);
     if (supabase) {
-      await supabase.from('playlists').delete().eq('id', id);
-    } else {
-      safeSave('mm_playlists', updated);
+      const { error } = await supabase.from('playlists').delete().eq('id', id);
+      if (error) console.error(error);
     }
   };
 
@@ -330,7 +347,11 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     };
     const updated = [...playlists, newPl];
     setPlaylists(updated);
-    if (!supabase) safeSave('mm_playlists', updated);
+    safeSave('mm_playlists', updated);
+    if (supabase) {
+      const { error } = await supabase.from('playlists').insert(newPl);
+      if (error) console.error(error);
+    }
   };
 
   const addClient = async (client: Partial<Client>) => {
@@ -349,10 +370,10 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
       };
       const updatedClients = clients.map(c => c.id === existingClient.id ? { ...c, ...updates } : c);
       setClients(updatedClients);
+      safeSave('mm_clients', updatedClients);
       if (supabase) {
-        await supabase.from('clients').update(updates).eq('id', existingClient.id);
-      } else {
-        safeSave('mm_clients', updatedClients);
+        const { error } = await supabase.from('clients').update(updates).eq('id', existingClient.id);
+        if (error) console.error(error);
       }
       return;
     }
@@ -378,30 +399,30 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     };
     const updated = [...clients, newClient];
     setClients(updated);
+    safeSave('mm_clients', updated);
     if (supabase) {
-      await supabase.from('clients').insert(newClient);
-    } else {
-      safeSave('mm_clients', updated);
+      const { error } = await supabase.from('clients').insert(newClient);
+      if (error) console.error(error);
     }
   };
 
   const updateClient = async (id: string, updates: Partial<Client>) => {
     const updated = clients.map(c => c.id === id ? { ...c, ...updates } : c);
     setClients(updated);
+    safeSave('mm_clients', updated);
     if (supabase) {
-      await supabase.from('clients').update(updates).eq('id', id);
-    } else {
-      safeSave('mm_clients', updated);
+      const { error } = await supabase.from('clients').update(updates).eq('id', id);
+      if (error) console.error(error);
     }
   };
 
   const deleteClient = async (id: string) => {
     const updated = clients.filter(c => c.id !== id);
     setClients(updated);
+    safeSave('mm_clients', updated);
     if (supabase) {
-      await supabase.from('clients').delete().eq('id', id);
-    } else {
-      safeSave('mm_clients', updated);
+      const { error } = await supabase.from('clients').delete().eq('id', id);
+      if (error) console.error(error);
     }
     
     // Also cleanup activity references if needed, or just let them stay with null references
@@ -431,10 +452,10 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     const updated = [...messages, newMessage];
     setMessages(updated);
     
+    safeSave('mm_messages', updated);
     if (supabase) {
-      await supabase.from('messages').insert(newMessage);
-    } else {
-      safeSave('mm_messages', updated);
+      const { error } = await supabase.from('messages').insert(newMessage);
+      if (error) console.error(error);
     }
 
     // Also add to activity log
@@ -451,10 +472,10 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     if (!profile) return;
     const updated = { ...profile, ...updates };
     setProfile(updated);
+    safeSave('mm_profile', updated);
     if (supabase) {
-      await supabase.from('profiles').update(updates).eq('id', profile.id);
-    } else {
-      safeSave('mm_profile', updated);
+      const { error } = await supabase.from('profiles').update(updates).eq('id', profile.id);
+      if (error) console.error(error);
     }
   };
 
@@ -475,10 +496,10 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     };
     const updated = [...shareLinks, newLink];
     setShareLinks(updated);
+    safeSave('mm_share_links', updated);
     if (supabase) {
-      await supabase.from('share_links').insert(newLink);
-    } else {
-      safeSave('mm_share_links', updated);
+      const { error } = await supabase.from('share_links').insert(newLink);
+      if (error) console.error(error);
     }
     return newLink;
   };
@@ -494,10 +515,10 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     };
     const updated = [newActivity, ...activities].slice(0, 50); // Keep last 50
     setActivities(updated);
+    safeSave('mm_activities', updated);
     if (supabase) {
-      await supabase.from('activities').insert(newActivity);
-    } else {
-      safeSave('mm_activities', updated);
+      const { error } = await supabase.from('activities').insert(newActivity);
+      if (error) console.error(error);
     }
   };
 
@@ -516,13 +537,13 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     
     setShareLinks(updated);
     
+    safeSave('mm_share_links', updated);
     if (supabase) {
-      await supabase
+      const { error } = await supabase
         .from('share_links')
         .update({ access_count: newCount })
         .eq('id', id);
-    } else {
-      safeSave('mm_share_links', updated);
+      if (error) console.error(error);
     }
   };
 
@@ -538,50 +559,34 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     };
     const updated = [...promoVideos, newVideo];
     setPromoVideos(updated);
+    safeSave('mm_promo_videos', updated);
     if (supabase) {
-      await supabase.from('promo_videos').insert(newVideo);
-    } else {
-      safeSave('mm_promo_videos', updated);
+      const { error } = await supabase.from('promo_videos').insert(newVideo);
+      if (error) console.error(error);
     }
   };
 
   const deletePromoVideo = async (id: string) => {
     const updated = promoVideos.filter(v => v.id !== id);
     setPromoVideos(updated);
+    safeSave('mm_promo_videos', updated);
     if (supabase) {
-      await supabase.from('promo_videos').delete().eq('id', id);
-    } else {
-      safeSave('mm_promo_videos', updated);
+      const { error } = await supabase.from('promo_videos').delete().eq('id', id);
+      if (error) console.error(error);
     }
   };
 
   const analyzeTrack = async (name: string): Promise<{ bpm: number, key: string, duration?: number, tags?: string[] }> => {
     try {
-      const { GoogleGenAI, Type } = await import('@google/genai');
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Analyze this music track name: "${name}". Suggest its likely BPM (number), Key Signature (string like "Am", "F#m", "C"), approximate duration in seconds, and 3-5 descriptive tags (genres/moods). Return as JSON.`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              bpm: { type: Type.NUMBER },
-              key: { type: Type.STRING },
-              duration: { type: Type.NUMBER },
-              tags: { 
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              }
-            },
-            required: ["bpm", "key", "tags"]
-          }
-        }
+      const response = await fetch("/api/analyze-metadata", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: name }),
       });
       
-      return JSON.parse(response.text.trim());
+      if (!response.ok) throw new Error("Server analysis failed");
+      
+      return await response.json();
     } catch (e) {
       console.error("AI Analysis failed:", e);
       return { bpm: 120, key: "C", tags: [] };
@@ -592,7 +597,7 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     <MediaStoreContext.Provider value={{
       tracks, playlists, clients, activities, profile, loading, shareLinks, messages, promoVideos,
       addTrack, updateTrack, deleteTrack, addPlaylist, updatePlaylist, deletePlaylist, addTrackToPlaylist, removeTrackFromPlaylist,
-      addClient, updateClient, deleteClient, updateProfile, addShareLink, addActivity, analyzeTrack, sendMessage, addPromoVideo, deletePromoVideo
+      addClient, updateClient, deleteClient, updateProfile, addShareLink, addActivity, analyzeTrack, sendMessage, addPromoVideo, deletePromoVideo, incrementShareLinkAccess
     }}>
       {children}
     </MediaStoreContext.Provider>
