@@ -210,7 +210,17 @@ export default function SharePortal({ track: initialTrack, playlist, shareLink }
               <div className="flex items-center justify-between">
                  <h2 className="text-2xl font-black tracking-tight">Reference Action</h2>
                  {shareLink.download_enabled ? (
-                   <button className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-zinc-400 hover:text-white transition-colors">
+                   <button 
+                     onClick={() => {
+                       if (activeTrack?.file_url) {
+                         const a = document.createElement('a');
+                         a.href = activeTrack.file_url;
+                         a.download = activeTrack.name;
+                         a.click();
+                       }
+                     }}
+                     className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-zinc-400 hover:text-white transition-colors"
+                   >
                      <Download className="w-4 h-4" /> Download Master
                    </button>
                  ) : (

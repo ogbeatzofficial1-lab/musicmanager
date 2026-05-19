@@ -31,6 +31,7 @@ interface MediaStoreContextType {
   promoVideos: PromoVideo[];
   addPromoVideo: (video: Partial<PromoVideo>) => Promise<void>;
   deletePromoVideo: (id: string) => Promise<void>;
+  incrementShareLinkAccess: (id: string) => Promise<void>;
 }
 
 const MediaStoreContext = createContext<MediaStoreContextType | undefined>(undefined);
@@ -88,22 +89,10 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
       const localMessages = localStorage.getItem('mm_messages');
       const localProfile = localStorage.getItem('mm_profile');
       
-      let parsedTracks = localTracks ? JSON.parse(localTracks) : [];
+      let parsedTracks = localTracks ? JSON.parse(localTracks) : null;
       
-      // Filter out or fix broken blob URLs that don't work after refresh
-      parsedTracks = parsedTracks.map((t: Track) => {
-        if (t.file_url?.startsWith('blob:')) {
-          // In this demo environment, blob URLs don't persist after refresh.
-          // We'll keep the track entry but it will have an error if played.
-          // Ideally, we'd have a persistent storage URL.
-          return { ...t, _brokenBlob: true }; 
-        }
-        return t;
-      });
-
-      // Seed if empty or only broken user tracks exist
-      if (parsedTracks.length === 0 || parsedTracks.every((t: any) => t.id.startsWith('sample-') || t._brokenBlob)) {
-        // We always ensure sample tracks are there and working
+      if (parsedTracks === null) {
+        // Initial state: Seed sample tracks
         const sampleTracks: Track[] = [
           {
             id: 'sample-1',
@@ -140,13 +129,17 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
             created_at: new Date().toISOString()
           }
         ];
-        
-        // Merge samples with existing tracks, prioritizing samples for playback
-        const merged = [...sampleTracks, ...parsedTracks.filter((t: any) => !t.id.startsWith('sample-'))];
-        setTracks(merged);
-        safeSave('mm_tracks', merged);
+        setTracks(sampleTracks);
+        safeSave('mm_tracks', sampleTracks);
       } else {
-        setTracks(parsedTracks);
+        // Filter out broken blobs if needed, but don't re-seed if empty
+        const cleanedTracks = parsedTracks.map((t: Track) => {
+          if (t.file_url?.startsWith('blob:')) {
+            return { ...t, _brokenBlob: true }; 
+          }
+          return t;
+        });
+        setTracks(cleanedTracks);
       }
 
       setPlaylists(localPlaylists ? JSON.parse(localPlaylists) : []);
@@ -250,19 +243,26 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
     const updatedTracks = tracks.filter(t => t.id !== id);
     setTracks(updatedTracks);
     
-    // Cascading delete: remove from playlists
+    // Cascading delete: remove from playlists and clean up local states
     const updatedPlaylists = playlists.map(pl => ({
       ...pl,
       track_ids: pl.track_ids.filter(tid => tid !== id)
     }));
     setPlaylists(updatedPlaylists);
 
+    const updatedPromoVideos = promoVideos.filter(v => v.track_id !== id);
+    setPromoVideos(updatedPromoVideos);
+
+    const updatedShareLinks = shareLinks.filter(l => l.track_id !== id);
+    setShareLinks(updatedShareLinks);
+
     if (supabase) {
       await supabase.from('tracks').delete().eq('id', id);
-      // Supabase should handle the relational part if schema is right, but manually updating state here
     } else {
       safeSave('mm_tracks', updatedTracks);
       safeSave('mm_playlists', updatedPlaylists);
+      safeSave('mm_promo_videos', updatedPromoVideos);
+      safeSave('mm_share_links', updatedShareLinks);
     }
 
     addActivity({
@@ -503,6 +503,27 @@ export function MediaStoreProvider({ children }: { children: React.ReactNode }) 
 
   const deleteActivity = (id: string) => {
     // ...
+  };
+
+  const incrementShareLinkAccess = async (id: string) => {
+    const link = shareLinks.find(l => l.id === id);
+    if (!link) return;
+
+    const newCount = (link.access_count || 0) + 1;
+    const updated = shareLinks.map(l => 
+      l.id === id ? { ...l, access_count: newCount } : l
+    );
+    
+    setShareLinks(updated);
+    
+    if (supabase) {
+      await supabase
+        .from('share_links')
+        .update({ access_count: newCount })
+        .eq('id', id);
+    } else {
+      safeSave('mm_share_links', updated);
+    }
   };
 
   const addPromoVideo = async (video: Partial<PromoVideo>) => {

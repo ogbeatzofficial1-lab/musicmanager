@@ -41,7 +41,7 @@ export default function ShareModal({ track, playlist, onClose }: ShareModalProps
       expires_at: expiresAt
     });
     // Automated URL Assembly matching live production path
-    const url = `${window.location.origin}/share.php?share=${link.token}`;
+    const url = `${window.location.origin}/?share=${link.token}`;
     setShareLink(url);
     setStep('result');
   };

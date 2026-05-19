@@ -9,7 +9,8 @@ import {
   Settings,
   Menu,
   ChevronRight,
-  MessageSquare
+  MessageSquare,
+  Video
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -28,6 +29,7 @@ export default function Shell({ children, activeView, onViewChange }: ShellProps
     { id: 'playlists', label: 'Playlists', icon: ListMusic },
     { id: 'clients', label: 'Clients', icon: Users },
     { id: 'messages', label: 'Messages', icon: MessageSquare },
+    { id: 'videos', label: 'Promo Archive', icon: Video },
     { id: 'sharing', label: 'Sharing', icon: Share2 },
     { id: 'activity', label: 'Activity', icon: ActivityIcon },
   ];

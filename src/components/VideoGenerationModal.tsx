@@ -56,10 +56,11 @@ export default function VideoGenerationModal({ track, playlist, onClose }: Video
     clearInterval(interval);
     
     // 3. Create the "Video" record
+    const isSourceVideo = track?.type?.startsWith('video/');
     const newVideo: Partial<PromoVideo> = {
       track_id: track?.id,
       playlist_id: playlist?.id,
-      video_url: track?.file_url || 'https://example.com/mock-video.mp4',
+      video_url: isSourceVideo ? track.file_url : 'https://assets.mixkit.co/videos/preview/mixkit-abstract-graphic-of-red-and-blue-lines-9252-large.mp4',
       thumbnail_url: track?.image_url || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=800',
       style: style,
       status: 'ready'
@@ -207,10 +208,17 @@ export default function VideoGenerationModal({ track, playlist, onClose }: Video
                 className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-12 items-center"
               >
                  <div className="aspect-[9/16] bg-black rounded-[3rem] border border-zinc-900 overflow-hidden relative shadow-2xl group">
-                    <img src={generatedVideo?.thumbnail_url} className="w-full h-full object-cover opacity-60" />
+                    <video 
+                      src={generatedVideo?.video_url} 
+                      className="w-full h-full object-cover opacity-60"
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                    />
                     
-                    {/* Mock Video Graphic Content */}
-                    <div className="absolute inset-0 p-8 flex flex-col justify-between">
+                    {/* Overlay Graphics */}
+                    <div className="absolute inset-0 p-8 flex flex-col justify-between pointer-events-none">
                        <div className="space-y-1">
                           <div className="text-[10px] font-black text-orange-500 uppercase tracking-widest">OG BEATZ</div>
                           <div className="text-2xl font-black italic uppercase tracking-tighter leading-tight">{name}</div>
